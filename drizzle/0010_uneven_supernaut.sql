@@ -1,0 +1,1 @@
+ALTER TABLE `invoiceEvents` MODIFY COLUMN `eventType` enum('created','approved','issued','delivered','reminded','disputed','dispute_resolved','payment','credit','reconciled','voided','document_generated','secure_link_created','secure_link_viewed','secure_link_revoked') NOT NULL;

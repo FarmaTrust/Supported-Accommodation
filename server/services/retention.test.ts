@@ -1,0 +1,9 @@
+import { describe, expect, it } from "vitest";
+import { canCompleteDeletion, retentionQueueState, validateRetentionDecision } from "./retention";
+
+describe("retention safeguards", () => {
+  it("requires independent approval for deletion and transfer", () => { expect(validateRetentionDecision({ requestedBy: 3, decidedBy: 3, legalHold: false, decision: "approved_delete" })).toEqual({ allowed: false, reason: "independent_approval_required" }); expect(validateRetentionDecision({ requestedBy: 3, decidedBy: 4, legalHold: false, decision: "approved_transfer" })).toEqual({ allowed: true, reason: "valid" }); });
+  it("prevents deletion while legal hold is active", () => { expect(validateRetentionDecision({ requestedBy: 3, decidedBy: 4, legalHold: true, decision: "approved_delete" })).toEqual({ allowed: false, reason: "legal_hold" }); expect(canCompleteDeletion({ status: "approved_delete", legalHold: true, resourceType: "document" })).toBe(false); });
+  it("only completes an approved document deletion", () => { expect(canCompleteDeletion({ status: "approved_delete", legalHold: false, resourceType: "document" })).toBe(true); expect(canCompleteDeletion({ status: "pending", legalHold: false, resourceType: "document" })).toBe(false); expect(canCompleteDeletion({ status: "approved_delete", legalHold: false, resourceType: "placement" })).toBe(false); });
+  it("classifies scheduled, eligible, due and held reviews", () => { const now = 1_000_000; expect(retentionQueueState({ retentionUntil: now + 20, reviewDueAt: now + 10, legalHold: true }, now)).toBe("hold"); expect(retentionQueueState({ retentionUntil: now + 20, reviewDueAt: now - 1, legalHold: false }, now)).toBe("review_due"); expect(retentionQueueState({ retentionUntil: now - 1, reviewDueAt: now + 10, legalHold: false }, now)).toBe("eligible"); expect(retentionQueueState({ retentionUntil: now + 20, reviewDueAt: now + 10, legalHold: false }, now)).toBe("scheduled"); });
+});

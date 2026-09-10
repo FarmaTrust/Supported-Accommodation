@@ -1,0 +1,69 @@
+# Supported Accommodation Hub — Verification Report
+
+## Provider resilience and multi-tenant/RBAC verification — 4 September 2026
+
+The reported `api.manus.im` hostname lookup failure was investigated as a temporary device or network DNS-resolution condition rather than a tenant-isolation or RBAC defect. During the investigation, the application environment resolved the hostname and established HTTPS connectivity. The Hub now maps transient provider DNS and transport failures to the safe public `AUTH_SERVICE_UNAVAILABLE` state, with retry, account-recovery and support-request actions, instead of exposing raw hostname or socket details.
+
+Focused tenant and RBAC validation passed with **19 tests in 5 files**. The full suite passed with **159 tests in 49 files**, alongside TypeScript and production-build validation. The final post-restart diagnostic window contained no server, browser or failed-network errors. See `docs/multi-tenant-rbac-summary-test-report.md` for the detailed control-level results and production limitations.
+
+## Visible error and loading-state repair — 4 September 2026
+
+Fresh browser, server and network diagnostics identified two application-level experience defects and one server warning. The logout procedure passed an obsolete `maxAge` option to Express cookie clearing, producing a deprecation warning. The option was removed while retaining the same secure, HTTP-only, same-site cookie attributes. The Overview and Compliance dashboard also treated an absent query response as a loading condition, which could leave users looking at unexplained skeleton panels instead of a recoverable state.
+
+The repaired UI now labels all initial data retrieval states in plain English, explains that returned records remain limited by company role, and supplies an actionable unavailable state with a stable support code when a response is unexpectedly absent. The Access control page now provides equivalent explicit loading feedback rather than a blank card. The final run passed TypeScript, the production build, and **157 automated tests in 48 files**. Desktop route checks confirmed that Access control loads successfully; Overview and Compliance continue to show clear progress panels during their initial authorised fetches. Fresh post-restart logs contained no server, browser or HTTP 4xx/5xx errors; the previous cookie-clear deprecation did not recur.
+
+## Sign-in feedback upgrade — 4 September 2026
+
+The public sign-in flow now provides an accessible secure-session loading state and maps safe sign-in outcomes to plain-English support messages with stable developer codes. OAuth callback failures redirect to the public screen using a constrained error-code allowlist rather than rendering raw callback, provider or session details. The authenticated shell also surfaces `AUTH_ACCESS_DENIED` feedback for forbidden API actions and gives signed-in users with no company membership a dedicated `AUTH_NO_WORKSPACE_ACCESS` state.
+
+## Recovery, support and statement upgrade — 4 September 2026
+
+The sign-in error state now includes an explicit **Account recovery** action that restarts the identity-provider journey without the Hub storing or resetting passwords. It also opens a prefilled support-request email containing only the safe developer code and browser path, with a visible warning not to include passwords, one-time codes or sensitive record data. Company administrators can configure tenant-scoped support contact details through Access control; changes require `config.write` and are restricted-audited.
+
+The finance statement API now accepts a selected Local Authority and range of up to three years. It rejects inverted or overlong date ranges and calculates opening/closing balances server-side from dated invoices, payments and issued credits. Issued invoice PDFs preserve the supplier, Local Authority, PO and placement-reference snapshots, can be downloaded or delivered through a revocable secure link, and offer a prefilled email workflow that requires a user to attach the generated PDF manually while no external email provider is active. TypeScript, focused support/statement tests, the full regression suite and the production build passed; the final restart produced no genuine server, browser or failing-network diagnostics.
+
+The implementation was verified with TypeScript, a production build, **154 automated tests in 46 files**, focused public auth-status and feedback-catalogue tests, desktop error-state inspection and fresh post-restart runtime logs with no browser, server or HTTP 4xx/5xx errors.
+
+## Finance archive and document-preview update — 4 September 2026
+
+The Finance workspace now includes a finance-authorised Statement PDF archive. It filters by Local Authority, supports text search, provides an in-browser PDF preview and offers a controlled download for stored archive records. Statement generation uses the same server-side selected-range calculation as the main statement view, stores PDF bytes in object storage, and retains tenant-scoped archive metadata with the document version and content hash. Invoice delivery now provides an embedded preview before download, secure-link creation or email-draft composition.
+
+The TEST tenant was extended with three fictional Local Authorities, `.test` contact addresses, eighteen fictional purchase-order references, fee schedules and invoice-ready facts. Database verification confirmed 3 Local Authorities, 18 active placements, 18 TEST fee schedules and 18 TEST invoices inside the dedicated TEST entity, and zero `TST-2026-*` invoices in operational entities. TypeScript, the full regression suite and the production build passed. Finance desktop and phone smoke checks confirmed the archive entry point is usable; an operational workspace without finance records correctly remains empty.
+
+## Production blank-screen repair — 4 September 2026
+
+The published site served its HTML and entry bundle successfully but rendered an empty application root. Browser inspection isolated the cause to a circular dependency created by the custom Vite `manualChunks` policy: the React vendor bundle imported the general vendor bundle while the general vendor bundle depended on React context. This left the client unable to create its React context during bootstrap.
+
+The custom chunk policy has been removed. Vite now generates its dependency-aware production graph automatically, retaining route-level lazy loading without the circular vendor boundary. TypeScript validation, the complete **150-test** suite and a production build passed after the repair. The published-site smoke check is recorded against the checkpoint that contains this change.
+
+## Company-admin RBAC verification
+
+The **Access control** workspace was validated as a company-scoped administration surface. Its API requires the caller to hold `config.write` through an active membership in the selected entity. The tested negative cases reject a caller without this authority, invalid role/capability values and a change that would downgrade the final active owner. A permitted role change writes a restricted immutable audit event with target user, business reason and both prior and subsequent access scope. The complete automated suite passed with **150 tests in 44 files** after this update, and the route was reviewed at desktop and phone widths after a clean restart with no observed request or runtime errors.
+
+## Automated verification
+
+| Verification | Command or method | Outcome |
+| --- | --- | --- |
+| Static type validation | `pnpm check` | Passed |
+| Unit and contract-oriented tests | `pnpm test` | 139 tests passed in 41 files |
+| Production client/server bundle | `pnpm build` | Passed with route and vendor chunk splitting |
+| Live schema reconciliation | Compared the restored source with the live database | Typed schema represents all 100 live tables; future migration history must be baselined before more schema changes |
+| Runtime route smoke check | Restarted the server and captured populated TEST-only Manager and Key Worker app routes plus an unauthorised Key Worker request | No unexpected server, browser or 5xx network errors strictly after `2026-08-27T22:27:36.000Z`; deliberate 403 access denials remained restricted |
+| Fictional scenario repeat load | `pnpm testdata:verify -- 1` runs the real loader twice and queries the database | Stable isolated TEST entity: 3 properties, 7 Key Workers, 9 young people, 3 placements per property, 42 shifts, one staff-request outcome alert and zero source-entity leakage |
+| Public secure-link failure | Opened invalid invoice and provider-pack tokens | Deliberate non-sensitive not-found state |
+
+The unit suite covers logout cookie clearing, every operational role’s high-risk capability boundaries, explicit entity extensions, property grants, active/expired/wrong-user placement assignments, property-certificate scope denial, issue/expiry chronology, same-property approved evidence, atomic renewal-obligation creation, property/staff category mapping, exact 90/60/30-day renewal bands, stable user-bound reminder/outbox keys, inactive email-adapter behavior, HR evidence restrictions, missing-evidence RAG behavior, calendar-birthday age calculation, under-14 overrides, stale calendar versions, ineligible workers, scenario structure, invoice arithmetic, secure links, retention, audit receipts, Regulation 32 governance, care escalation, working-time exceptions and offline idempotency. The reconstructed governance coverage additionally verifies data-rights deadline and lifecycle rules, self-verification denial, independent approval, delivery readiness, regulatory approval/activation separation, outcome-measure activation/pause, observation period validation, placement-scope enforcement, and source-level route/navigation state contracts. Staff-workspace coverage verifies route registration, its backward-compatible alias, self-service contract use, a rendered loading state, safe no-profile response, permission denial, and non-sensitive restricted-state rendering. Notification coverage verifies recipient-scoped staff-request decision alerts, versioned idempotency keys, owner-only read and resolve behavior, and validated direct-tab selection. The Manager and Key Worker app tests verify their dedicated routes, existing scoped data sources, manager-queue denial, caseload scope contract, attendance-exception guard, and safe forbidden response for an invalid entity identifier.
+
+## Visual verification
+
+The latest review checked the Governance & outcomes workspace at 1280 × 800 and 390 × 844. The selected navigation item, information-rights empty state, page-level action and horizontally scrollable tab strip remain readable. A redundant second **New case** action was removed and reverified. The TEST-only information-rights, regulatory-framework and outcomes panels were reviewed in their populated state, from an existing authorised owner session with membership in the isolated TEST entity. The restored Staff workspace was reviewed at the same breakpoints in live no-profile, TEST populated and unauthorised restricted states; its `New request` action, profile card, Requests and Supervision panels retained their data-boundary messaging. A rendered test verifies its accessible loading state. The TEST-only Staff-request outcome notification was also reviewed at both breakpoints. The new Manager App and Key Worker App were reviewed at desktop and phone widths using the isolated TEST entity; the Key Worker app’s invalid-entity route returned the intended restricted state and no operational details. The final strict log review used cutoff `2026-08-27T22:27:36.000Z`; no unexpected server or browser error was detected. The logged 403 responses are deliberate tests of the invalid entity identifier and no longer fall through to an audit database error. Separate identity-provider role-account sign-off remains an organisational pre-live action.
+
+## Frozen-release boundary
+
+Checkpoint `c8f13491` delivers the reconstructed data-rights workspace, regulatory-framework designer and management-outcomes workspace using the existing reconciled schema, TEST-only loaded-state acceptance support, and final automated and runtime evidence. It does not claim that these workflow states are legal advice or proof of compliance. External payroll, accounting, e-signature, scan, email, SMS and authority integrations are also not active without credentials and supplier testing. The Compliance email outbox is deliberately inactive: reminder candidates and delivery history are persisted, but no external email is transmitted.
+
+The earlier target to produce one complete recovered-upgrades checkpoint was intentionally superseded after the user approved a fast scope freeze. Checkpoint `30a71ba5` records the recovered frozen release. Checkpoint `d682da4e` adds the validated input rules, manager rota calendar, isolated fictional TEST entity and reusable delivery skill. This follow-on release reconstructs the data-rights, regulatory-framework and management-outcomes modules while retaining all pre-live organisational assurance requirements.
+
+## Organisational acceptance
+
+The application-level role matrix, routing controls and high-risk state guards passed automated acceptance, and the authenticated owner session passed all-route browser smoke checks. The detailed results and repeatable live-account checklist are in `docs/role-acceptance-matrix.md`. Final identity-provider sign-off still requires the provider to create its own non-production accounts for owner, registered manager, support worker, HR/compliance, finance and read-only profiles; organisation facts and identities were deliberately not fabricated. Independent security, accessibility, retention, backup and safeguarding assurance remains mandatory before production reliance.

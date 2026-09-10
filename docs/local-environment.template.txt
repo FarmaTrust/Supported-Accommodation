@@ -1,0 +1,20 @@
+# Supported Accommodation Hub — local development values
+# Copy these lines into a new ignored .env.local file, then replace placeholders.
+# Never commit .env.local or use production credentials locally.
+
+# Server-only secrets
+DATABASE_URL=mysql://USER:PASSWORD@HOST:3306/DATABASE
+JWT_SECRET=replace-with-a-strong-random-development-only-secret
+OAUTH_SERVER_URL=https://your-authorised-oauth-service.example
+BUILT_IN_FORGE_API_URL=https://your-authorised-forge-service.example
+BUILT_IN_FORGE_API_KEY=replace-with-development-only-api-key
+OWNER_OPEN_ID=replace-with-authorised-development-owner-open-id
+
+# Browser-visible OAuth configuration (public identifier and endpoint only)
+VITE_APP_ID=replace-with-public-development-oauth-application-id
+VITE_OAUTH_PORTAL_URL=https://your-authorised-oauth-portal.example
+
+# Optional browser-visible application presentation
+VITE_APP_TITLE=Supported Accommodation Hub
+VITE_APP_LOGO=
+NODE_ENV=development

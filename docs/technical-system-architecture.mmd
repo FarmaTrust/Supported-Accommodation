@@ -1,0 +1,151 @@
+flowchart TB
+  subgraph USERS[User and client trust boundary]
+    Owner[Company administrator]
+    Manager[Registered manager]
+    Worker[Key Worker mobile web client]
+    Guest[Guest property-summary viewer]
+    Admin[Platform operations administrator]
+    Webhook[External webhook sender]
+  end
+
+  subgraph IDENTITY[Identity and edge boundary]
+    Browser[HTTPS browser session]
+    IdP[Current delegated identity provider
+Passwordless authentication]
+    IdPAdmin[IdP admin console
+MFA, account lifecycle, conditional access]
+    Edge[Managed edge
+TLS, WAF, rate limit, CSP]
+    OAuth[OAuth callback
+one-time nonce and fixed return route]
+    Session[Signed secure session cookie
+Bearer fallback for constrained preview clients]
+  end
+
+  subgraph HUB[Supported Accommodation Hub modular monolith]
+    BFF[tRPC BFF / API boundary
+Zod validation and request context]
+    IAM[Identity and access module
+active user, membership, role, capability,
+property scope and placement assignment]
+    Provision[Colleague provisioning module
+email pre-authorisation, pending scope,
+post-provider-sign-in activation, revocation]
+    Core[Accommodation, placement and operations
+entities, properties, units, occupancy,
+rota, timesheets and workflow]
+    Workforce[Workforce module
+staff profile, checks, training,
+availability and supervision]
+    Care[Care and safeguarding module
+Key Worker records, health, incidents,
+medication and restricted reviews]
+    Compliance[Compliance and governance module
+obligations, evidence, quality,
+work plans and statutory reviews]
+    Finance[Finance and controlled sharing
+fees, immutable invoices, statements,
+provider packs and guest links]
+    Documents[Documents and evidence module
+metadata, versions, quarantine,
+retention and secure retrieval]
+    Notify[Notification and outbox module
+in-app notifications, delivery intent,
+attempts and receipts]
+    Audit[Audit and assurance module
+append-only hash chain, decisions,
+receipt mirror and verification]
+    Job[Authenticated scheduled-job endpoint
+deterministic due-state evaluation]
+  end
+
+  subgraph DATA[Managed data boundary]
+    DB[(MySQL/TiDB relational system of record
+scope, state, relationships, hashes,
+membership, invitation and audit metadata)]
+    Storage[(Private object storage
+documents, PDFs and audit receipts)]
+    Cache[(Optional managed cache
+rate limits and read models)]
+    Backups[(Encrypted backup / PITR
+production target)]
+  end
+
+  subgraph ASYNC[Managed asynchronous boundary]
+    Scheduler[Managed authenticated scheduler]
+    Dispatcher[Controlled outbox dispatcher
+only for approved active connections]
+    Review[Dead-letter / human review queue]
+  end
+
+  subgraph OPTIONAL[Optional production adapters - not enabled by this baseline]
+    Scan[Malware scanning service]
+    Mail[Email, SMS or push provider]
+    Sign[Electronic-signature provider]
+    Accounts[Accounting / payroll provider]
+    SIEM[SIEM / security monitoring]
+  end
+
+  Owner --> Browser
+  Manager --> Browser
+  Worker --> Browser
+  Guest --> Edge
+  Admin --> IdPAdmin
+  Browser --> Edge
+  Browser -. passwordless sign-in .-> IdP
+  IdP --> OAuth
+  OAuth --> Session
+  Session --> Edge
+  Edge --> BFF
+  Webhook --> Edge
+  Edge -. signed external webhook only .-> BFF
+
+  BFF --> IAM
+  BFF --> Provision
+  BFF --> Core
+  BFF --> Workforce
+  BFF --> Care
+  BFF --> Compliance
+  BFF --> Finance
+  BFF --> Documents
+  BFF --> Notify
+  BFF --> Audit
+  IAM --> DB
+  Provision --> DB
+  Core --> DB
+  Workforce --> DB
+  Care --> DB
+  Compliance --> DB
+  Finance --> DB
+  Documents --> DB
+  Documents --> Storage
+  Notify --> DB
+  Audit --> DB
+  Audit --> Storage
+  BFF -. optional .-> Cache
+  DB --> Backups
+
+  Scheduler --> Job
+  Job --> Compliance
+  Job --> Notify
+  Job --> Audit
+  Notify --> Dispatcher
+  Dispatcher --> Mail
+  Dispatcher --> Sign
+  Dispatcher --> Accounts
+  Dispatcher --> Review
+  Documents --> Scan
+  Audit -. security events .-> SIEM
+
+  classDef client fill:#e8f2ff,stroke:#1769aa,color:#102a43
+  classDef edge fill:#fff3cd,stroke:#b7791f,color:#553c0b
+  classDef app fill:#e8f8ef,stroke:#237a57,color:#123b2a
+  classDef data fill:#f4e8ff,stroke:#805ad5,color:#322659
+  classDef async fill:#ffe9ed,stroke:#c53030,color:#5a1212
+  classDef optional fill:#edf2f7,stroke:#4a5568,color:#1a202c,stroke-dasharray: 5 5
+  class Owner,Manager,Worker,Guest,Admin,Webhook,Browser client
+  class IdP,IdPAdmin,Edge,OAuth,Session edge
+  class BFF,IAM,Provision,Core,Workforce,Care,Compliance,Finance,Documents,Notify,Audit,Job app
+  class DB,Storage,Cache,Backups data
+  class Scheduler,Dispatcher,Review async
+  class Scan,Mail,Sign,Accounts,SIEM optional

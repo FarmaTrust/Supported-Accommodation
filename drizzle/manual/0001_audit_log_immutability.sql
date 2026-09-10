@@ -1,0 +1,14 @@
+-- Managed TiDB in this project does not permit CREATE TRIGGER and the runtime
+-- principal cannot change its own table grants. Therefore database-trigger or
+-- REVOKE-based enforcement cannot be applied from the application workspace.
+--
+-- The production control implemented in server/services/audit.ts is:
+-- 1. no update/delete procedures for auditLogs;
+-- 2. a SHA-256 previousHash/eventHash chain for tamper detection;
+-- 3. a unique JSON receipt mirrored to object storage for every inserted event;
+-- 4. no object delete helper exposed by the application runtime.
+--
+-- If a future dedicated database principal supports table-specific grants,
+-- revoke UPDATE and DELETE on auditLogs from the application principal while
+-- retaining INSERT and SELECT. Do not run generic grant statements from this
+-- file because managed credentials vary by environment.

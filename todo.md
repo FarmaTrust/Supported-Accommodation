@@ -1,0 +1,251 @@
+# Project TODO
+
+- [x] Review the attached specification and consolidate the confirmed scope
+- [x] Initialise a full-stack project with authentication, database, server APIs, file storage, and scheduled-job support
+- [x] Research current Ofsted supported-accommodation regulations, quality standards, statutory guidance, data-protection duties, workforce checks, invoicing controls, accessibility requirements, and foreseeable policy changes
+- [x] Document product assumptions, regulatory findings, architecture decisions, delivery limits, and future-ready enhancements
+- [x] Define entity, property, role, assignment, and record-level permission rules with least-privilege defaults
+- [x] Extend authenticated user profiles with operational roles, entity memberships, property assignments, and account status
+- [x] Implement server-side authorisation guards for entity, property, role, assigned-young-person, finance, HR, and safeguarding scopes
+- [x] Implement append-only activity logging for sensitive reads, creates, changes, exports, downloads, login events, and permission decisions
+- [x] Implement data-retention metadata, review queues, legal holds, export controls, and deletion approval safeguards
+- [x] Implement legal-entity profiles with separate branding, Ofsted and registration details, contacts, bank details, invoice settings, and numbering sequences
+- [x] Implement property and unit registers with addresses, capacity, room status, Ofsted references, operating status, geofence coordinates, and responsible managers
+- [x] Implement occupancy and vacancy history with property, room, placement, move-in, move-out, availability, and reason fields
+- [x] Implement safety-certificate, insurance, lease, licence, contractor, maintenance, and inventory records with evidence uploads and renewal dates
+- [x] Implement workforce profiles covering employment details, emergency contacts, references, contracts, job descriptions, and employment status
+- [x] Implement safer-recruitment records for DBS, update-service status, Right to Work, references, qualifications, and evidence restrictions
+- [x] Implement training, supervision, appraisal, probation, competency, policy-acknowledgement, and renewal records
+- [x] Implement a unified compliance calendar generated from property, workforce, policy, placement, review, and finance records
+- [x] Implement RAG compliance calculations at platform, entity, property, staff, young-person, and requirement levels
+- [x] Implement configurable reminder lead times, escalation routes, ownership, acknowledgement, snooze, resolution, and overdue rules
+- [x] Implement inspection-ready evidence exports with configurable scope, redaction controls, manifests, and audit logging
+- [x] Implement a controlled document and policy hub with folders, metadata, version history, review dates, approval status, and acknowledgements
+- [x] Implement reusable templates for provider packs, support/pathway plans, risk assessments, incident notifications, supervisions, and placement commencements
+- [x] Implement operational work plans generated from compliance gaps, incidents, audits, placement reviews, property tasks, and improvement records
+- [x] Implement work-plan assignment, target dates, dependencies, progress notes, evidence, escalation, and completion approval
+- [x] Implement rota planning by property with required staffing levels, role/skill matching, coverage warnings, open shifts, and conflict checks
+- [x] Implement approval-based shift offers, allocations, swaps, cancellations, and manager overrides
+- [x] Implement handovers with structured prompts, risk flags, unresolved actions, acknowledgement, and property/shift scoping
+- [x] Implement mobile location-verified clock-in and clock-out with geofence tolerance, off-site reasons, flags, and audit evidence
+- [x] Implement timesheet calculation, approval, exceptions, adjustments, and payroll-ready exports
+- [x] Implement young-person referral, matching, placement decision, commencement, and closure workflows
+- [x] Implement young-person profiles using references rather than unnecessary identifying data in general operational views
+- [x] Implement support/pathway, risk, safety, placement, and review plans with version history and approval states
+- [x] Implement professional contacts, local-authority information, review dates, placement milestones, and document links
+- [x] Restrict support-worker access to explicitly assigned young people and log every successful and denied access attempt
+- [x] Implement a mobile Key Worker experience for incidents, daily reports, weekly reports, and monthly reviews
+- [x] Add property-address and young-person-reference selectors with context-aware pre-population in Key Worker forms
+- [x] Add guided Key Worker prompts for mood, attitude, discussions, points to note, plan, next review, and suggestions/observations
+- [x] Add suggested input text, safe draft saving, mandatory-field guidance, chronology checks, and manager review where appropriate
+- [x] Implement incident and significant-event workflows with severity, immediate actions, notifications, follow-up tasks, and restricted safeguarding content
+- [x] Implement fee schedules by entity, local authority, property, placement type, effective dates, VAT treatment, and contract references
+- [x] Implement sequential invoice numbering with per-entity collision protection and immutable issued-invoice snapshots
+- [x] Implement invoice creation using local-authority name/address, purchase-order number, young-person reference, invoice date, invoice number, 28-day fee period, calculated amount, configurable VAT, and bank details
+- [x] Implement invoice draft, approval, issue, sent, part-paid, paid, disputed, credited, and overdue states
+- [x] Implement payment allocation, statements, credit notes, aged debt, reminder history, dispute notes, and finance-only restrictions
+- [x] Implement branded invoice document generation and secure delivery records
+- [x] Implement guided local-authority introduction/provider packs populated from entity, Ofsted, contact, property, vacancy, fee, and bank-detail records
+- [x] Implement branded pack document generation plus expiring, revocable, view-logged secure links
+- [x] Implement global search with permission-aware results across people, properties, placements, invoices, documents, actions, and compliance records
+- [x] Implement saved filters, recent records, favourites, dashboard priorities, and role-specific default views
+- [x] Implement record-to-record pre-population and derived values to reduce repeated entry across referrals, placements, plans, shifts, invoices, and packs
+- [x] Implement duplicate detection, stale-data warnings, missing-evidence prompts, validation, and guided corrective actions
+- [x] Implement in-app notifications with correct owner routing, read state, escalation state, and deep links to the affected records
+- [x] Implement deterministic background jobs for compliance, reviews, work-plan actions, acknowledgements, milestones, and invoices
+- [x] Implement a minimalist Scandinavian visual system using cool-gray surfaces, black typography, generous spacing, pastel blue and blush accents, and accessible contrast
+- [x] Implement a responsive dashboard shell using the provided dashboard components and mobile bottom navigation for frequent Key Worker actions
+- [x] Implement progressive disclosure with drawers, dialogs, guided action buttons, concise forms, clear empty states, and touch-friendly controls
+- [x] Implement desktop, tablet, and phone layouts with keyboard navigation, visible focus, reduced-motion support, and WCAG-oriented semantics
+- [x] Implement meaningful loading, offline/error, permission-denied, no-results, incomplete-record, and background-job status states
+- [x] Add realistic non-personal configuration examples only; do not fabricate customer reviews, ratings, or testimonials
+- [x] Add Vitest coverage for permission guards, entity scoping, assignment restrictions, RAG calculations, invoice totals/numbering, secure links, retention rules, and scheduled-job logic
+- [x] Run schema/type checks, unit tests, production build, and targeted security/error-path tests
+- [x] Verify the full interface visually at desktop and mobile breakpoints and correct accessibility or responsive defects
+- [x] Complete end-to-end acceptance checks for owner, registered manager, support worker, HR/compliance, finance, and read-only workflows
+- [x] Prepare implementation notes, regulatory research references, configuration guidance, known limitations, and a prioritised future roadmap
+- [x] Save the first complete project checkpoint and deliver the preview for user testing
+- [x] Save a completed architecture document covering product assumptions, architecture decisions, delivery limits, and future-ready enhancements
+- [x] Persist a formal least-privilege permission model covering entity scope, property scope, operational roles, young-person assignment rules, sensitivity classes, and permission evaluation order
+- [x] Recover the stable 42a5faa4 checkpoint after the sandbox reset and reconcile all 100 already-applied live database tables into the typed Drizzle source schema without destructive SQL
+- [x] Rebuild the identity assurance, secure document quarantine, resilience, audit verification, Regulation 32 and Regulation 28 workspaces lost with the uncheckpointed sandbox reset
+- [x] Rebuild enhanced placement, health, medication, curfew, college, court and Key Worker acknowledgement workspaces using assigned-placement controls and dropdown-led pre-population
+- [x] Rebuild specialist safeguarding, complaint, allegation, missing, restraint and behaviour-support workspaces with restricted evidence and management review
+- [x] Rebuild advanced staff availability, working-time, shift-change alert, replacement rota and worked-shift summary controls
+- [x] Defer controlled integration, data-rights, regulatory-framework and management-analytics workspace reconstruction to a later release under the user-approved frozen-scope decision
+- [x] Add encrypted IndexedDB Key Worker draft storage with device-bound ownership, 48-hour expiry, versioning and explicit sensitivity warnings
+- [x] Add a controlled offline submission queue with idempotency keys, connectivity recovery, conflict detection, authoritative server reconciliation and user-resolved re-queuing
+- [x] Enforce offline restrictions that prevent caching unrelated young-person, HR, finance, bank, document and broad property data
+- [x] Add upgrade-focused Vitest coverage for delivered assurance, Regulation 28/32, safeguarding, rota policy and offline reconciliation; defer tests for deferred modules with those modules
+- [x] Run final release-scope type, test, production-build, log, accessibility, desktop and phone verification while deferring all-module validation with the deferred modules
+- [x] Update operator, data-protection, offline-use, acceptance, limitation and roadmap documentation; preserve deferred-module documentation as later-release work
+- [x] Supersede the complete-recovery checkpoint with the user-approved frozen-scope checkpoints and explicit deferral record
+- [x] Add controlled user feedback for encrypted draft save, discard and conflict re-queue storage failures
+- [x] Add focused transactional offline sync integration coverage for applied, duplicate, rejected and conflict receipt outcomes
+- [x] Add document-scan retry/resubmission, object-storage audit-receipt verification and focused Assurance/Regulation 28/32 tests
+- [x] Complete complaint escalation/response, allegation outcome/closure, behaviour-support review and missing return-interview workflows
+- [x] Gate manager-only care acknowledgement actions in the UI and add focused health, medication, curfew and scheduled-activity tests
+- [x] Generate working-time exceptions by evaluating active policies against shift duration, weekly hours, rest, overlap and availability, with focused replacement/alert/summary tests
+- [x] Freeze this delivery at the currently recovered core, assurance, statutory-review, care, safeguarding, rota and offline Key Worker scope; defer unfinished integration, data-rights, framework-designer and analytics reconstruction to a later release
+- [x] Run one final release-blocker-only type check, full test suite, production build and fresh runtime log review
+- [x] Update essential implementation, verification and limitation documentation for the frozen recovery release
+- [x] Save and deliver the frozen-scope review checkpoint without claiming deferred modules are complete
+- [x] Confirm server, browser and network logs contain no errors strictly after the final 2026-08-25T11:18:16 restart
+- [x] Create a reusable supported-accommodation platform delivery and recovery skill following the skill-creator workflow
+- [x] Add shared server-authoritative validation for end-before-start date ranges with field-specific corrective error messages
+- [x] Enforce a default minimum young-person age of 14 at placement/referral entry and provide a controlled manager override with mandatory reason and audit evidence
+- [x] Show clear inline and toast error feedback for invalid dates, age rules, failed overrides and conflicting rota changes
+- [x] Add a manager-only drag-and-drop calendar for scheduling and rescheduling Key Worker shifts across properties
+- [x] Revalidate property scope, worker assignment, shift duration, overlap, availability and working-time rules after every calendar move
+- [x] Create an idempotent fictional test-data loader clearly labelled non-production, including three properties, seven Key Workers and three young people per property
+- [x] Include 30 Radford Road in the fictional property set and avoid using any real person’s identity or contact details
+- [x] Add focused tests for date ranges, age calculation, manager override authorization, drag/drop rescheduling and seed idempotency
+- [x] Run full type, test, production-build, responsive calendar and fresh-log validation
+- [x] Update delivery documentation and save a reviewable checkpoint for the validation, calendar, test-data and reusable-skill upgrade
+- [x] Isolate the complete fictional scenario in a separate TEST-labelled entity that includes a TEST-labelled 30 Radford Road property
+- [x] Add `rescheduleShift` router integration tests for stale version, property-scope denial, worker eligibility, and override-required outcomes
+- [x] Add and run an automated repeated-loader verification that proves exact scenario counts remain stable
+- [x] Document that checkpoint 30a71ba5 and upgrade checkpoint d682da4e supersede the abandoned complete-recovery target while integration, data-rights, framework-designer and analytics reconstruction remain deferred
+- [x] Refresh the isolated TEST — Training Provider scenario and verify three properties, seven Key Workers, nine young people, three placements per property and 42 rota shifts are ready for inspection
+- [x] Add property-level Ofsted registration, gas-safety, electrical-safety and fire-safety record types to the Compliance workspace
+- [x] Support property, certificate/reference number, issue date, expiry/review date, provider/inspector, status, notes and controlled evidence linkage for property compliance records
+- [x] Enforce server-side property scope, date chronology and required-field validation with clear corrective user errors
+- [x] Recalculate compliance status and renewal warnings from authoritative property-record dates and evidence state
+- [x] Add focused tests plus full type, test, build, desktop/mobile and fresh-log verification for property compliance records
+- [x] Update operator documentation and save a reviewable property-compliance checkpoint
+- [x] Add an at-a-glance compliance dashboard summarising property and staff certificate/training status across all accessible properties
+- [x] Add controlled property certificate categories for HMO licence, gas safety, electrical safety, fire safety, insurance, Ofsted registration/renewal and other configured legal requirements
+- [x] Add controlled staff categories for DBS, Right to Work, safeguarding, first aid, medication, fire safety, food hygiene, manual handling and other configured training/check requirements
+- [x] Calculate red/amber/green/grey renewal states with explicit 3-month, 2-month and 1-month reminder bands and overdue alerts
+- [x] Generate idempotent 90-day, 60-day and 30-day reminder events for property certificates, staff checks and staff training renewals
+- [x] Add credential-ready email delivery with recipient routing, delivery history, retry-safe idempotency and clear inactive-provider status
+- [x] Add a categorised scanned-certificate library using secure object storage, document folders, immutable versions, scan/quarantine status and property/staff evidence links
+- [x] Enforce entity, property, role and staff-record authorization on dashboard totals, evidence access and reminder recipients
+- [x] Add focused tests for certificate taxonomy, reminder bands, idempotency, authorization, evidence categorisation and email-adapter behavior
+- [x] Run full type, test, production-build, desktop/mobile dashboard and fresh-log validation
+- [x] Update operator documentation and save a reviewable unified compliance dashboard checkpoint
+- [x] Add an at-a-glance compliance dashboard summarising property and staff certificate/training status across all accessible properties
+- [x] Add controlled property certificate categories for HMO licence, gas safety, electrical safety, fire safety, insurance, Ofsted registration/renewal and other configured legal requirements
+- [x] Add controlled staff categories for DBS, Right to Work, safeguarding, first aid, medication, fire safety, food hygiene, manual handling and other configured training/check requirements
+- [x] Calculate red/amber/green/grey renewal states with explicit 3-month, 2-month and 1-month reminder bands and overdue alerts
+- [x] Generate idempotent 90-day, 60-day and 30-day reminder events for property certificates, staff checks and staff training renewals
+- [x] Add credential-ready email delivery with recipient routing, delivery history, retry-safe idempotency and clear inactive-provider status
+- [x] Add a categorised scanned-certificate library using secure object storage, document folders, immutable versions, scan/quarantine status and property/staff evidence links
+- [x] Enforce entity, property, role and staff-record authorization on dashboard totals, evidence access and reminder recipients
+- [x] Add focused tests for certificate taxonomy, reminder bands, idempotency, authorization, evidence categorisation and email-adapter behavior
+- [x] Run full type, test, production-build, desktop/mobile dashboard and fresh-log validation
+- [x] Update operator documentation and save a reviewable unified compliance dashboard checkpoint
+- [x] Implement the selected in-app-first reminder architecture and show email delivery as inactive until a provider is connected, without attempting external transmission
+- [x] Verify checkpoint 0197c11d is the active preview baseline and pause further product feature development
+- [x] Produce a backend-ready solution architecture covering domains, services, trust boundaries, data stores, APIs, asynchronous workflows, integrations and deployment
+- [x] Create and render a systems architecture diagram suitable for backend developer implementation planning
+- [x] Save the restored-baseline architecture package and deliver it with explicit implementation assumptions and next steps
+- [x] Run clean TypeScript, Vitest, production-build and fresh runtime diagnostics for the Supported Accommodation Hub
+- [x] Fix only evidenced test, type, build or runtime failures and add focused regression coverage where needed
+- [x] Verify repaired routes at desktop and phone widths and confirm clean post-restart logs
+- [x] Save a reviewable tested-and-repaired checkpoint and report the exact verification results
+- [x] Extend the isolated TEST entity with three additional fictional properties and four additional Key Workers, preserving idempotent scenario ownership
+- [x] Populate the expanded TEST scenario with coherent dashboard-ready property, staff, placement, rota and compliance-evidence records across renewal states
+- [x] Add and run negative multi-tenant authorization tests proving entity, property and placement-scoped data cannot cross company boundaries
+- [x] Investigate and fix every evidenced data-isolation, authorization, loader, dashboard or runtime defect discovered during the expanded test run
+- [x] Run full type, test, production-build, responsive and fresh-log validation for the expanded TEST scenario and tenant-isolation controls
+- [x] Write a full commercial-readiness test report that distinguishes verified controls, limitations and required production decisions
+- [x] Save a reviewable expanded-scenario and test-report checkpoint
+- [x] Inspect the isolated TEST scenario, document storage and compliance contracts before adding mock evidence
+- [x] Create an idempotent TEST-only mock property and staff certificate evidence loader with clearly invalid-for-use watermarks
+- [x] Populate renewal bands, evaluate in-app reminders and verify no mock records leak to operational entities
+- [x] Run validation, update test-data guidance and save a reviewable mock-evidence checkpoint
+- [x] Add a company-admin RBAC workspace that lists active members, their operational role, property access and scoped additional capabilities
+- [x] Allow only tenant owners/company admins to assign operational roles, update property grants and manage allowed scoped capabilities for Key Workers
+- [x] Prevent cross-company user, property or role changes; protect the last active tenant owner; enforce a non-empty override reason for elevated role/capability changes
+- [x] Create immutable audit events for RBAC role, property-scope and capability changes with before/after scope metadata
+- [x] Add dropdown-led role selection, property access controls, capability descriptions, confirmation states and clear corrective errors in the responsive UI
+- [x] Add focused negative authorization tests for non-admin callers, cross-tenant targets, invalid roles/capabilities, last-owner protection and audit evidence
+- [x] Run full type, test, build, desktop/mobile RBAC workflow and fresh-log validation
+- [x] Update access-control guidance and save a reviewable RBAC checkpoint
+- [x] Add a company-admin RBAC workspace that lists active members, their operational role, property access and scoped additional capabilities
+- [x] Allow only tenant owners/company admins to assign operational roles, update property grants and manage allowed scoped capabilities for Key Workers
+- [x] Prevent cross-company user, property or role changes; protect the last active tenant owner; enforce a non-empty override reason for elevated role/capability changes
+- [x] Create immutable audit events for RBAC role, property-scope and capability changes with before/after scope metadata
+- [x] Add dropdown-led role selection, property access controls, capability descriptions, confirmation states and clear corrective errors in the responsive UI
+- [x] Add focused negative authorization tests for non-admin callers, cross-tenant targets, invalid roles/capabilities, last-owner protection and audit evidence
+- [x] Run full type, test, build, desktop/mobile RBAC workflow and fresh-log validation
+- [x] Update access-control guidance and save a reviewable RBAC checkpoint
+- [x] Inspect fresh server, browser and network diagnostics to identify the reported system failure
+- [x] Reproduce and repair the evidenced failure without weakening tenant, property or role-based controls
+- [x] Run full type, test, build, desktop/mobile and strict post-restart runtime verification of the repair
+- [x] Document the root cause and repair, then save a reviewable checkpoint
+- [x] Inspect the sign-in, OAuth callback and authentication error paths and define safe user/developer error codes
+- [x] Implement structured authentication and authority errors without exposing sensitive account or tenant details
+- [x] Add an accessible sign-in loading state and plain-English error feedback with stable developer error codes
+- [x] Add focused tests and verify sign-in loading/error states on desktop and phone
+- [x] Update operator guidance and save a reviewable sign-in experience checkpoint
+- [x] Add a provider-safe account-recovery route from sign-in errors without storing or exposing passwords in the Hub
+- [x] Allow company administrators to configure tenant-scoped support email, phone, contact name and support guidance for access errors
+- [x] Add prefilled user support-request email forms that include safe developer code, current page and tenant contact details without personal or sensitive record content
+- [x] Add secure PDF generation for authorised reports with prefilled young-person reference, Local Authority, PO number, contact/email and report requirements
+- [x] Add controlled download, secure evidence storage and email-ready attachment workflows for registered managers and permitted Local Authority recipients
+- [x] Add a finance/registered-manager statement-of-account workspace with a selected date range up to three years and authoritative opening/closing balances
+- [x] Enforce tenant, finance role, Local Authority recipient, placement-reference and document-access controls across recovery, support, PDF and statement workflows
+- [x] Add focused tests for recovery feedback, tenant support contacts, PDF metadata/redaction, email-ready attachments and statement range/authorization logic
+- [x] Run full type, test, build, desktop/mobile and fresh-log validation
+- [x] Update operator guidance and save a reviewable recovery, reporting and finance checkpoint
+- [x] Add a finance-only archive for previously generated statement PDFs with authorised search, date/authority filters, secure preview and download
+- [x] Preserve statement PDF archive metadata, selected range, authority scope, generated time, owner and immutable content hash without exposing other tenants' finance records
+- [x] Add controlled in-browser preview for generated invoice and statement PDFs before download, secure-link creation or email-ready preparation
+- [x] Extend the isolated TEST-only scenario with clearly fictional Local Authorities, finance emails, professional contacts, young people, placements, fee schedules and invoice-ready facts
+- [x] Create and verify TEST-only invoice/statement records and ensure no fictional finance records or emails leak to operational entities
+- [x] Create complete developer code documentation covering architecture, domains, data model, API contracts, security, local setup, tests, operations and deployment
+- [x] Package code documentation for download and a prefilled attachment-ready email without automatic external transmission
+- [x] Validate archive/preview, cross-tenant finance boundaries, TEST-loader isolation and documentation packaging through existing regression coverage, two-pass loader execution and manual finance verification
+- [x] Run full type, test, build, desktop/mobile and strict runtime validation
+- [x] Update documentation and save a reviewable finance archive and code-documentation checkpoint
+- [x] Add a finance-only archive for previously generated statement PDFs with authorised search, date/authority filters, secure preview and download
+- [x] Preserve statement PDF archive metadata, selected range, authority scope, generated time, owner and immutable content hash without exposing other tenants' finance records
+- [x] Add controlled in-browser preview for generated invoice and statement PDFs before download, secure-link creation or email-ready preparation
+- [x] Extend the isolated TEST-only scenario with clearly fictional Local Authorities, finance emails, professional contacts, young people, placements, fee schedules and invoice-ready facts
+- [x] Create and verify TEST-only invoice/statement records and ensure no fictional finance records or emails leak to operational entities
+- [x] Create complete developer code documentation covering architecture, domains, data model, API contracts, security, local setup, tests, operations and deployment
+- [x] Package code documentation for download and a prefilled attachment-ready email without automatic external transmission
+- [x] Validate archive/preview, cross-tenant finance boundaries, TEST-loader isolation and documentation packaging through existing regression coverage, two-pass loader execution and manual finance verification
+- [x] Run full type, test, build, desktop/mobile and strict runtime validation
+- [x] Update documentation and save a reviewable finance archive and code-documentation checkpoint
+- [x] Collect fresh browser, server and network evidence for every currently shown error or malfunction
+- [x] Reproduce and repair each confirmed defect without weakening authorization, tenant scope or evidence controls
+- [x] Run full type, test, build, responsive and post-restart runtime verification after repairs
+- [x] Document the verified bug fixes and save a reviewable repair checkpoint
+- [x] Create an editable Word source-code reference organised by directory, excluding dependencies, generated builds, log files, secrets and runtime data
+- [x] Collect fresh evidence for the reported `api.manus.im` hostname-resolution failure and distinguish application defects from external dependency availability
+- [x] Add safe, actionable user-facing fallback handling for confirmed authentication/provider connectivity failures without weakening security
+- [x] Investigate and repair any other evidenced browser, server, network, authorization or tenant-isolation defects
+- [x] Run focused multi-tenant isolation and RBAC tests plus full type, test, build, responsive and fresh-log validation
+- [x] Produce a concise multi-tenant isolation and RBAC summary test report with verified results and stated limitations
+- [x] Save a reviewable resilience and RBAC test-report checkpoint
+- [x] Inspect current authentication, entity membership, document-access and audit contracts for secure guest invitation boundaries
+- [x] Add hashed, time-limited, revocable guest invitation records with tenant/property scope, read-only policy and one-time or bounded-use lifecycle controls
+- [x] Enforce guest access server-side so invitations cannot expose young-person, safeguarding, HR, finance, document-library or cross-tenant records
+- [x] Build company-admin invitation creation, copy/revoke and audit-review workflows with safe guest entry states
+- [x] Add explicit passwordless identity-provider sign-in messaging while preserving the existing nonce-bound OAuth security flow
+- [x] Add focused invitation lifecycle, scope-denial, token-security and multi-tenant isolation tests, then run full validation and responsive checks
+- [x] Update operator guidance and save a reviewable guest-invitation and passwordless-sign-in checkpoint
+- [x] Review the colleague’s supplied error recording and inspect current sharing, authentication and deployment evidence
+- [x] Reproduce the confirmed colleague-access failure without bypassing identity, membership or tenant controls
+- [x] Repair the verified sharing or authentication defect and add focused regression coverage
+- [x] Run full type, test, build, responsive and strict fresh-diagnostic validation for the colleague-access repair
+- [x] Save and republish a reviewable colleague-access repair checkpoint with safe access guidance
+- [x] Inspect the active identity-provider integration, local user bootstrap, membership model and existing architecture baseline
+- [x] Define a colleague identity-provisioning workflow that separates provider authentication from Hub tenant, role, property and placement authorization
+- [x] Implement supported Hub-side colleague invitation and pending-membership safeguards without bypassing provider authentication
+- [x] Update the backend-ready solution architecture, production decision register and systems architecture diagram for colleague provisioning
+- [x] Validate identity, membership, tenant-scope and access lifecycle controls with focused and full regression checks
+- [x] Save a reviewable identity-provisioning and architecture handoff checkpoint with implementation guidance
+- [x] Produce and render a full technical system architecture diagram showing current and proposed trust boundaries, modules, data stores, authentication, scheduling, audit and external adapters
+- [ ] Configure individual external identity-provider accounts once an authorised provider administrator or approved directory integration is available
+- [x] Inspect the current platform-administrator guard and identity activation boundary for the explicitly approved all-company access request
+- [x] Add an auditable, time-limited all-company pre-authorisation for zaki@farmatrust.com that creates separate owner memberships only after matching passwordless provider sign-in
+- [x] Validate activation safety and confirm no ordinary or cross-company user receives expanded access
+- [x] Save and publish the named all-company owner-membership pre-authorisation with secure sign-in guidance
+- [x] Inspect environment-variable usage, managed-secret handling and ignore rules before producing a developer-safe template
+- [x] Create a sanitised local-environment template and local configuration guidance without real credentials or production values
+- [x] Verify the template contains no secrets and does not change deployed environment configuration
+- [x] Save and publish the safe environment-template documentation release

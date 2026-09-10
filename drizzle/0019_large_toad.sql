@@ -1,0 +1,1 @@
+ALTER TABLE `colleagueInvitations` MODIFY COLUMN `operationalRole` enum('owner','registered_manager','support_worker','hr_compliance','finance','read_only') NOT NULL;

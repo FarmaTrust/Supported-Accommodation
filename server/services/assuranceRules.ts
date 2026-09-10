@@ -1,0 +1,4 @@
+export function auditReceiptBodyStatus(body:unknown,event:{id:number;eventHash:string}){if(!body||typeof body!=="object")return"mismatch" as const;const receipt=body as Record<string,unknown>;return receipt.auditEventId===event.id&&receipt.eventHash===event.eventHash?"verified" as const:"mismatch" as const;}
+export function scanRetryAllowed(status:string){return["failed","quarantined"].includes(status);}
+export function notificationStatusForDecision(decision:string){return decision==="same_authority_exempt"||decision==="not_required"?"exempt" as const:"decision_recorded" as const;}
+export function blocksReg28Sharing(restrictions:Array<{restrictionType:string;status:string}>){return restrictions.some(item=>["active","review_due"].includes(item.status)&&["all_processing","sharing","export"].includes(item.restrictionType));}

@@ -1,0 +1,10 @@
+import { createHash } from "node:crypto";
+
+export const OFFLINE_SCHEMA_VERSION=1;
+export const MAX_OFFLINE_AGE_MS=48*60*60*1000;
+const MAX_CLOCK_SKEW_MS=5*60*1000;
+
+function canonical(value:unknown):string{if(value===null||typeof value!=="object")return JSON.stringify(value);if(Array.isArray(value))return`[${value.map(canonical).join(",")}]`;return`{${Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>`${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;}
+export function offlinePayloadHash(value:unknown){return createHash("sha256").update(canonical(value)).digest("hex");}
+export function assessOfflineEnvelope(input:{clientVersion:number;clientCreatedAt:number;expiresAt:number;basePlacementUpdatedAt:number;placementUpdatedAt:number;placementStatus:string;now:number}){if(input.clientVersion!==OFFLINE_SCHEMA_VERSION)return{code:"unsupported_version",message:"This device draft uses an unsupported format. Review and recreate it."};if(input.clientCreatedAt>input.now+MAX_CLOCK_SKEW_MS)return{code:"device_clock_invalid",message:"The device clock is too far ahead. Correct it before synchronising."};if(input.expiresAt>input.clientCreatedAt+MAX_OFFLINE_AGE_MS)return{code:"expiry_invalid",message:"The offline expiry exceeds the permitted 48-hour window."};if(input.expiresAt<=input.now||input.clientCreatedAt<input.now-MAX_OFFLINE_AGE_MS)return{code:"draft_expired",message:"This offline draft expired and must be reviewed before a new submission is created."};if(!["active","notice"].includes(input.placementStatus))return{code:"placement_inactive",message:"The placement is no longer active for Key Worker recording."};if(input.placementUpdatedAt>input.basePlacementUpdatedAt)return{code:"placement_changed",message:"Placement details changed after this draft began. Review the current record before re-queuing."};return null;}
+export function assessIdempotency(existingHash:string|undefined,incomingHash:string){if(!existingHash)return"new" as const;return existingHash===incomingHash?"duplicate" as const:"key_reused" as const;}

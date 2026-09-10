@@ -1,0 +1,111 @@
+{
+  "version": "7",
+  "dialect": "mysql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1787630031540,
+      "tag": "0000_cheerful_diamondback",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1787632928134,
+      "tag": "0001_parched_surge",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787633763345,
+      "tag": "0002_useful_namor",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1787634022461,
+      "tag": "0003_bent_wallow",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1787635896116,
+      "tag": "0004_careless_shotgun",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1787636375915,
+      "tag": "0005_condemned_jackpot",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1787636917641,
+      "tag": "0006_absent_scarlet_spider",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1787637974335,
+      "tag": "0007_cloudy_squadron_supreme",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1787638586174,
+      "tag": "0008_magical_wong",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1787639009255,
+      "tag": "0009_daily_wrecking_crew",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1787639199568,
+      "tag": "0010_uneven_supernaut",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1787815821808,
+      "tag": "0011_lethal_steve_rogers",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1787816507450,
+      "tag": "0012_woozy_boom_boom",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1787816758993,
+      "tag": "0013_thin_darkhawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1787818187540,
+      "tag": "0014_mean_shiver_man",
+      "breakpoints": true
+    }
+  ]
+}
