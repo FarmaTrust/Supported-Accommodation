@@ -240,7 +240,7 @@
 - [x] Validate identity, membership, tenant-scope and access lifecycle controls with focused and full regression checks
 - [x] Save a reviewable identity-provisioning and architecture handoff checkpoint with implementation guidance
 - [x] Produce and render a full technical system architecture diagram showing current and proposed trust boundaries, modules, data stores, authentication, scheduling, audit and external adapters
-- [ ] Configure individual external identity-provider accounts once an authorised provider administrator or approved directory integration is available
+- [x] Configure individual external identity-provider accounts once an authorised provider administrator or approved directory integration is available — superseded by the MySQL-backed local email/password authentication release
 - [x] Inspect the current platform-administrator guard and identity activation boundary for the explicitly approved all-company access request
 - [x] Add an auditable, time-limited all-company pre-authorisation for zaki@farmatrust.com that creates separate owner memberships only after matching passwordless provider sign-in
 - [x] Validate activation safety and confirm no ordinary or cross-company user receives expanded access
@@ -249,3 +249,103 @@
 - [x] Create a sanitised local-environment template and local configuration guidance without real credentials or production values
 - [x] Verify the template contains no secrets and does not change deployed environment configuration
 - [x] Save and publish the safe environment-template documentation release
+- [x] Inspect project scripts, runtime configuration and existing developer guidance for the README handoff
+- [x] Create a README covering frontend, backend, database, tests, migrations, passwordless sign-in and deployment workflows
+- [x] Provide the existing sanitised local environment template and clarify that live environment files and secrets are not shared
+- [x] Validate documented commands and configuration-variable coverage without exposing secrets
+- [x] Save and publish the developer README and safe environment-setup documentation release
+- [x] Inspect existing OAuth/session/user/recovery routes and canonical authorisation boundaries before introducing local credentials
+- [x] Define the MySQL credential, password-hash, reset-token, rate-limit, lockout, migration and audit model without plaintext passwords
+- [x] Implement email/password sign-in, secure session issuance, initial-owner bootstrap and authorised local account administration
+- [x] Implement generic reset-request, time-limited reset-token and secure password-update workflows without account enumeration
+- [x] Replace passwordless sign-in screens and remove legacy OAuth entry only after local authentication is fully tested
+- [x] Add focused credential, lockout, reset, migration, session, tenant-isolation and access-control regression tests
+- [x] Run type, full regression, production build, fresh diagnostics and desktop/mobile validation for local authentication
+- [x] Update the README and operator guidance with local-authentication configuration, operational controls and deployment requirements
+- [x] Save and publish a reviewable MySQL-backed authentication release
+- [x] Inspect the current role, capability, tenant, property and placement-scope enforcement for the requested technical access specification
+- [x] Define Superadmin, Owner, Key Worker, Key Worker Contractor, HR and Finance functionality, data visibility and explicit restrictions
+- [x] Create a bullet-format backend and native-app role/data access handoff for the technical team
+- [x] Review the role handoff for least privilege, tenant isolation and safeguarding boundaries before delivery
+- [x] Inspect the local owner-bootstrap, user, credential and membership flows and identify the reported 401 cause
+- [x] Harden the owner-bootstrap route so it can establish only the first local owner credential and cannot rotate an existing owner password
+- [x] Create the requested Raja Sharif owner account using established local-auth hashing, normalisation, session and explicit Owner memberships in Nightingale Noble and TEST — Training Provider only
+- [x] Verify the valid owner sign-in lifecycle and confirm owner-bootstrap remains a one-time protected setup path
+- [x] Hide the first-owner bootstrap action once a local credential exists, preventing avoidable user-facing bootstrap 401 responses
+- [x] Document the remediation, save and publish the secure owner-account provisioning checkpoint
+- [x] Inspect existing shift handover, report review, Manager App, local-authentication, navigation and email-delivery patterns
+- [x] Add optional structured nursing-shift brief templates for consistent handover notes
+- [x] Add visible reviewed-and-approved dictated-text audit evidence with immutable reviewers and timestamps
+- [x] Add Manager App actions to approve or return reports with required return reasons and restricted audit records
+- [x] Enforce forced password change on first local sign-in without disclosing credentials or weakening tenant scope
+- [x] Improve local sign-in with safe incorrect-password feedback, password visibility toggle and password-reset entry points
+- [x] Implement provider-gated password-reset delivery with hashed one-time tokens and generic account-enumeration-safe requests; deliberately leave outbound email disabled for testing
+- [x] Record raja.sharif@farmatrust.com as the intended verified production sender and recipient; do not configure it without an approved provider key and Farmatrust domain verification
+- [x] Keep outbound password-reset email disabled for testing and display explicit company-administrator recovery guidance instead of a sent-email claim
+- [x] Provision the five approved fictional TEST-only role accounts using the confirmed compliant initial password and forced first-login rotation
+- [x] Create compliant role-scoped test accounts for Superadmin, Owner, Manager, Key Worker and Finance without a global cross-tenant bypass
+- [x] Consolidate Key Worker and Key Worker App navigation into one accessible Keyworker App entry
+- [x] Verify all numbered requirements, full tenant/RBAC regression, production build, runtime diagnostics and responsive interfaces
+- [x] Document the implementation, validation evidence and the deliberate email-provider testing-mode prerequisite, then save a release checkpoint
+- [x] Inspect platform-admin enforcement, company/user monitoring data, reset-token lifecycle and TEST-account patterns for the requested additions
+- [x] Add an auditable TEST-only mock reset flow that reveals links only for fictional TEST accounts and always denies operational-company accounts
+- [x] Build a server-authorised Superadmin dashboard for approved platform administrators to monitor active companies, users and access status
+- [x] Create the fictional Guest display account with a TEST-only email login, the approved temporary password and forced first-login rotation
+- [x] Add focused test coverage for mock-reset isolation, Superadmin denial and Guest account scope
+- [x] Run full type, tenant/RBAC regression, production-build, clean-runtime and responsive validation
+- [x] Document TEST-only reset/account boundaries, save and publish the Superadmin/testing release
+- [x] Reproduce the reported Guest TEST-account sign-in failure through normal local authentication and inspect credential, lockout and membership state
+- [x] Repair the evidenced Guest account or sign-in defect through the established local-authentication service without storing a plaintext password
+- [x] Verify normal Guest sign-in, required first-login rotation, TEST-only membership and regression coverage
+- [x] Save and publish a verified Guest account repair checkpoint with corrected access guidance
+- [x] Inspect the Vite, server and managed preview proxy configuration for the reported HMR WebSocket failure
+- [x] Repair the managed-preview HMR WebSocket route without affecting production build or authenticated application routes
+- [x] Validate fresh preview HMR behaviour, normal authenticated pages, full regression and production build
+- [x] Save and publish a verified HMR repair checkpoint with clear development-versus-production guidance
+- [x] Keep the temporary sign-in link delivery focused on Hub implementation and exclude unrelated AI-report content
+- [x] Add a hash-only, account-specific temporary sign-in link model with a maximum 30-day expiry, revocation and one-time redemption lifecycle
+- [x] Enforce company-administrator issue/revoke controls only for existing active local accounts with a shared active company membership
+- [x] Redeem temporary links through the standard password-version-bound local session while retaining forced-password-change and tenant/RBAC controls
+- [x] Add responsive temporary-link issue/revoke and public redemption workflows without raw-token persistence or audit disclosure
+- [x] Add focused token, authorization, lifecycle, session and safe-error tests, then complete release validation
+- [x] Update local-auth operations guidance and save a secure temporary-link checkpoint
+- [x] Elevate the explicitly approved Raja Sharif test account to platform Superadmin without removing its active company memberships
+- [x] Rotate the supplied test credential through the normal salted local-authentication flow and verify ordinary session issuance
+- [x] Record restricted audit evidence, run focused validation and save a test-account checkpoint
+- [x] Repair the test Superadmin credential line-ending defect through the standard local-authentication service
+- [x] Verify published email/password sign-in, platform-admin session issuance and audit-chain continuity
+- [x] Save a tested fictional-account recovery checkpoint
+- [x] Provision resettable fictional Manager, Finance and Key Worker credentials in TEST — Training Provider only
+- [x] Apply role-specific TEST scope: Manager and Finance across TEST properties; Key Worker limited to TEST — Radford House and its assigned placements
+- [x] Verify normal local-session sign-in plus representative allowed and denied role boundaries, then save a checkpoint
+- [x] Mirror verified TEST role boundaries in the mobile-friendly workspace navigation without treating the UI as a security boundary
+- [x] Validate Manager, Finance and Key Worker visible navigation against server-authoritative RBAC, then release the fictional account set
+- [x] Add audited visitor logging for authorised Key Workers and Managers, scoped to their properties
+- [x] Add explicit prior-shift handover acknowledgement with server-enforced scope and audit evidence
+- [x] Reorder Keyworker App around clocking, handover acknowledgement, and mandatory guided reports with dictation prompts
+- [x] Compact mobile cards, actions and whitespace while ensuring every Keyworker/Manager action opens a working, authorised record flow
+- [x] Add focused security, lifecycle, route and responsive validation, then checkpoint the mobile operations release
+- [x] Replace oversized vertical overview metrics with compact horizontal, mobile-first summary actions
+- [x] Route overview, compliance-health and Manager summary cards to their corresponding authorised data workspaces
+- [x] Audit and correct dashboard priority and Manager report action destinations, then validate desktop and mobile workflows
+- [x] Replace Rota Controls and matching rota summary cards with compact horizontal actions that reveal relevant queue data or open the authoritative workspace
+- [x] Apply a reusable compact operational-row treatment to high-volume queue and list surfaces without weakening status or action clarity
+- [x] Add per-user, per-shift unacknowledged-handover reminders at shift start with scoped delivery and audit evidence
+- [x] Add role-authorised report completion rollups by Key Worker and property, with current state summaries rather than inferred completion
+- [x] Add accessible, user-controllable short notification sound for newly arrived unread alerts without repeating on render
+- [x] Test responsive paths, server authority, reminder state, report rollups and notification sound behavior before release
+- [x] Standardise fictional Manager, Finance and Key Worker test credentials through the normal salted authentication service
+- [x] Verify the public sign-in flow and TEST-only scope after the controlled credential reset, then checkpoint the recovery
+- [x] Reset the approved Superadmin and all fictional TEST-role accounts to one verified test credential through salted local authentication
+- [x] Verify each role’s normal published sign-in and tenant scope while retaining secure authentication, then checkpoint the recovery
+- [x] Add a server-authorised room-occupancy lookup that reveals an assigned resident only to users with the required property and placement scope
+- [x] Make occupied room controls open the authorised assignment summary without embedding resident data in the property list response
+- [x] Replace property-evidence colour words with accessible green tick, amber warning, red cross and neutral icons, then validate role boundaries and mobile/desktop views
+- [x] Build a reusable local browser-dictation control for narrative text fields with microphone permission feedback, spell-check and review-before-submit editing
+- [x] Apply individual microphone controls to Key Worker report prompts, incident reports, handovers, approval/return notes and visitor logs without sending audio to the server
+- [x] Extend the reusable control across remaining operational narrative forms and validate mobile text alignment, touch targets and browser fallback states
+- [x] Add focused dictation and form-contract tests, run full validation, capture phone and desktop verification, then checkpoint the accessibility release
+- [x] Preserve existing fictional TEST credentials during role-account provisioning instead of silently rotating a known password
+- [x] Repair the TEST-only reset-link parameter mismatch and retain legacy reset-link compatibility
+- [x] Add regression tests for stable test credentials, reset-link routing and normal secure sign-in, then issue and verify one controlled test credential baseline
+- [x] Run full authentication validation, mobile/desktop recovery checks and checkpoint the permanent test-access repair

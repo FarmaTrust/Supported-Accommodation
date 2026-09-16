@@ -6,10 +6,17 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import viteConfig from "../../vite.config";
 
+export function getManagedPreviewHmrClientOptions(managedPreview = Boolean(process.env.MANUS_WEBDEV_PROJECT_ID)) {
+  return managedPreview ? { protocol: "wss" as const, clientPort: 443 } : {};
+}
+
 export async function setupVite(app: Express, server: Server) {
   const serverOptions = {
     middlewareMode: true,
-    hmr: { server },
+    // The managed preview exposes the local Node listener through a public HTTPS
+    // proxy. Pin the browser HMR client to that proxy's standard WSS port instead
+    // of allowing Vite's fallback to attempt localhost:5173 in the browser.
+    hmr: { server, ...getManagedPreviewHmrClientOptions() },
     allowedHosts: true as const,
   };
 

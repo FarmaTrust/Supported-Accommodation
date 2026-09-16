@@ -1,4 +1,3 @@
-import { startLogin } from "@/const";
 import { trpc } from "@/lib/trpc";
 import { getAuthFeedback } from "@shared/authFeedback";
 import { TRPCClientError } from "@trpc/client";
@@ -10,10 +9,6 @@ type UseAuthOptions = {
 };
 
 export function useAuth(options?: UseAuthOptions) {
-  // Login is started via startLogin() in the effect below, only when we actually
-  // navigate — never during render. startLogin() mints a one-time nonce + writes
-  // the state cookie, so calling it per render would overwrite the cookie and
-  // desync it from an in-flight login's `state`.
   const { redirectOnUnauthenticated = false, redirectPath } = options ?? {};
   const utils = trpc.useUtils();
 
@@ -24,7 +19,7 @@ export function useAuth(options?: UseAuthOptions) {
 
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {
-      utils.auth.status.setData(undefined, { user: null, issue: null });
+      utils.auth.status.setData(undefined, { user: null, issue: null, passwordChangeRequired: false });
     },
   });
 
@@ -46,7 +41,7 @@ export function useAuth(options?: UseAuthOptions) {
       try {
         sessionStorage.removeItem("manus-cookie");
       } catch {}
-      utils.auth.status.setData(undefined, { user: null, issue: null });
+      utils.auth.status.setData(undefined, { user: null, issue: null, passwordChangeRequired: false });
       await utils.auth.status.invalidate();
     }
   }, [logoutMutation, utils]);
@@ -66,6 +61,7 @@ export function useAuth(options?: UseAuthOptions) {
       loading: statusQuery.isLoading || logoutMutation.isPending,
       error: statusQuery.error ?? logoutMutation.error ?? null,
       isAuthenticated: Boolean(statusQuery.data?.user),
+      passwordChangeRequired: Boolean(statusQuery.data?.passwordChangeRequired),
     };
   }, [
     statusQuery.data,
@@ -82,11 +78,8 @@ export function useAuth(options?: UseAuthOptions) {
     if (typeof window === "undefined") return;
     if (redirectPath && window.location.pathname === redirectPath) return;
 
-    // Navigate at this moment only. startLogin() mints the nonce + cookie itself.
     if (redirectPath) {
       window.location.href = redirectPath;
-    } else {
-      startLogin();
     }
   }, [
     redirectOnUnauthenticated,

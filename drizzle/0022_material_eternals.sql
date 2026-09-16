@@ -1,0 +1,1 @@
+ALTER TABLE `localAuthCredentials` ADD `mustChangePassword` int DEFAULT 0 NOT NULL;

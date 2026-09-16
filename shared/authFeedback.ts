@@ -8,6 +8,7 @@ export const AUTH_FEEDBACK_CODES = [
   "AUTH_SERVICE_UNAVAILABLE",
   "AUTH_ACCESS_DENIED",
   "AUTH_NO_WORKSPACE_ACCESS",
+  "AUTH_LOCAL_SIGN_IN_REQUIRED",
 ] as const;
 
 export type AuthFeedbackCode = (typeof AUTH_FEEDBACK_CODES)[number];
@@ -73,6 +74,12 @@ const AUTH_FEEDBACK: Record<AuthFeedbackCode, AuthFeedback> = {
     title: "No company access has been assigned",
     message: "Your account is signed in, but it has not been assigned to a company workspace. Ask a company administrator to add you before continuing.",
     actionLabel: "Sign out",
+  },
+  AUTH_LOCAL_SIGN_IN_REQUIRED: {
+    code: "AUTH_LOCAL_SIGN_IN_REQUIRED",
+    title: "Email and password sign-in is required",
+    message: "This workspace now uses its local email and password sign-in screen. Enter your assigned details there to continue.",
+    actionLabel: "Return to sign in",
   },
 };
 

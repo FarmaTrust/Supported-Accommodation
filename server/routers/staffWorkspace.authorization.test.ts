@@ -26,7 +26,7 @@ vi.mock("./shared", () => ({
   requireDb: vi.fn(async () => {
     const transactionDb = {
       update: () => ({ set: () => ({ where: async () => undefined }) }),
-      insert: () => ({ values: (values: any) => { state.inserted.push(values); return { onDuplicateKeyUpdate: async () => undefined }; } }),
+      insert: () => ({ values: (values: any) => { state.inserted.push(values); return { onDuplicateKeyUpdate: async () => undefined, $returningId: async () => [{ id: state.inserted.length }] }; } }),
     };
     return {
       select: () => ({ from: () => ({ where: () => ({ limit: async () => state.selectResults.length ? [state.selectResults.shift()] : [] }) }) }),
@@ -71,6 +71,12 @@ describe("staff workspace procedure authorization", () => {
     state.propertyDenied = true;
     await expect(caller().arriveVisitor({ entityId: 1, propertyId: 2, visitorType: "relative", name: "Visitor", purpose: "Family visit", idCheckStatus: "verified" })).rejects.toThrow(/Property access denied/);
     await expect(caller().uploadEvidence({ entityId: 1, propertyId: 2, title: "Incident evidence", fileName: "photo.jpg", mimeType: "image/jpeg", contentBase64: "ZmFrZQ==", documentType: "evidence", classification: "general" })).rejects.toThrow(/Property access denied/);
+  });
+
+  it("creates an encrypted visitor arrival only after the authorised property check", async () => {
+    await expect(caller().arriveVisitor({ entityId: 1, propertyId: 2, visitorType: "professional", name: "Fictional professional", purpose: "Planned review", idCheckStatus: "verified" })).resolves.toEqual({ id: 1 });
+    expect(state.inserted).toContainEqual(expect.objectContaining({ entityId: 1, propertyId: 2, visitorType: "professional", arrivedAt: expect.any(Number), createdBy: 7 }));
+    expect(state.inserted.some(value => value.name === "Fictional professional")).toBe(false);
   });
 
   it("blocks young-person notes when the active placement assignment is absent", async () => {

@@ -33,6 +33,13 @@ export class ProviderUnavailableError extends Error {
   }
 }
 
+export class LegacySessionRetiredError extends Error {
+  constructor() {
+    super("Legacy provider session has been retired");
+    this.name = "LegacySessionRetiredError";
+  }
+}
+
 export function isTemporaryProviderConnectivityError(error: unknown): boolean {
   if (!axios.isAxiosError(error)) return false;
   const code = typeof error.code === "string" ? error.code.toUpperCase() : "";
@@ -47,6 +54,8 @@ export type SessionPayload = {
   openId: string;
   appId: string;
   name: string;
+  authType?: "oauth" | "local";
+  passwordVersion?: number;
 };
 
 const EXCHANGE_TOKEN_PATH = `/webdev.v1.WebDevAuthPublicService/ExchangeToken`;
@@ -202,6 +211,10 @@ class SDKServer {
     );
   }
 
+  async createLocalSessionToken(input: { openId: string; name: string; passwordVersion: number }) {
+    return this.signSession({ openId: input.openId, appId: ENV.appId || "local", name: input.name, authType: "local", passwordVersion: input.passwordVersion }, { expiresInMs: ONE_YEAR_MS });
+  }
+
   async signSession(
     payload: SessionPayload,
     options: { expiresInMs?: number } = {}
@@ -215,6 +228,8 @@ class SDKServer {
       openId: payload.openId,
       appId: payload.appId,
       name: payload.name,
+      authType: payload.authType ?? "oauth",
+      passwordVersion: payload.passwordVersion,
     })
       .setProtectedHeader({ alg: "HS256", typ: "JWT" })
       .setExpirationTime(expirationSeconds)
@@ -223,7 +238,7 @@ class SDKServer {
 
   async verifySession(
     cookieValue: string | undefined | null
-  ): Promise<{ openId: string; appId: string; name: string } | null> {
+  ): Promise<{ openId: string; appId: string; name: string; authType: "oauth" | "local"; passwordVersion?: number } | null> {
     if (!cookieValue) {
       console.warn("[Auth] Missing session cookie");
       return null;
@@ -234,7 +249,7 @@ class SDKServer {
       const { payload } = await jwtVerify(cookieValue, secretKey, {
         algorithms: ["HS256"],
       });
-      const { openId, appId, name } = payload as Record<string, unknown>;
+      const { openId, appId, name, authType, passwordVersion } = payload as Record<string, unknown>;
 
       if (
         !isNonEmptyString(openId) ||
@@ -249,6 +264,8 @@ class SDKServer {
         openId,
         appId,
         name,
+        authType: authType === "local" ? "local" : "oauth",
+        passwordVersion: typeof passwordVersion === "number" && Number.isInteger(passwordVersion) ? passwordVersion : undefined,
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));
@@ -310,29 +327,16 @@ class SDKServer {
       return buildCronUser(userInfo);
     }
 
+    if (session.authType !== "local") throw new LegacySessionRetiredError();
+
     const sessionUserId = session.openId;
     const signedInAt = new Date();
     let user = await db.getUserByOpenId(sessionUserId);
 
-    // If user not in DB, sync from OAuth server automatically
-    if (!user) {
-      try {
-        const userInfo = await this.getUserInfoWithJwt(sessionToken ?? "");
-        await db.upsertUser({
-          openId: userInfo.openId,
-          name: userInfo.name || null,
-          email: userInfo.email ?? null,
-          loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
-          lastSignedIn: signedInAt,
-        });
-        user = await db.getUserByOpenId(userInfo.openId);
-      } catch (error) {
-        console.error("[Auth] Failed to sync user from OAuth:", error);
-        if (isTemporaryProviderConnectivityError(error)) {
-          throw new ProviderUnavailableError();
-        }
-        throw ForbiddenError("Failed to sync user info");
-      }
+    if (session.authType === "local") {
+      if (!user) throw ForbiddenError("Local user not found");
+      const { isLocalSessionCurrent } = await import("../services/localAuth");
+      if (!(await isLocalSessionCurrent(user.id, session.passwordVersion))) throw ForbiddenError("Local session has been revoked");
     }
 
     if (!user) {
@@ -345,11 +349,7 @@ class SDKServer {
     });
 
     const refreshedUser = await db.getUserByOpenId(user.openId);
-    if (refreshedUser) {
-      const { acceptPendingColleagueInvitations } = await import("../services/colleagueProvisioning");
-      await acceptPendingColleagueInvitations({ userId: refreshedUser.id, email: refreshedUser.email });
-      return (await db.getUserByOpenId(user.openId)) ?? refreshedUser;
-    }
+    if (refreshedUser) return refreshedUser;
 
     return user;
   }

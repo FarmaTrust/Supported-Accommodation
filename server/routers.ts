@@ -26,15 +26,20 @@ import { governanceHubRouter } from "./routers/governanceHub";
 import { accessControlRouter } from "./routers/accessControl";
 import { guestInvitationsRouter } from "./routers/guestInvitations";
 import { colleagueInvitationsRouter } from "./routers/colleagueInvitations";
+import { localAuthRouter } from "./routers/localAuth";
+import { superadminRouter } from "./routers/superadmin";
+import { temporaryLoginLinksRouter } from "./routers/temporaryLoginLinks";
+import { requiresLocalPasswordChange } from "./services/localAuth";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    status: publicProcedure.query(opts => ({
+    status: publicProcedure.query(async opts => ({
       user: opts.ctx.user,
       issue: opts.ctx.user ? null : (opts.ctx.authIssue ?? null),
+      passwordChangeRequired: opts.ctx.user ? await requiresLocalPasswordChange(opts.ctx.user.id) : false,
     })),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
@@ -68,6 +73,9 @@ export const appRouter = router({
   accessControl: accessControlRouter,
   guestInvitations: guestInvitationsRouter,
   colleagueInvitations: colleagueInvitationsRouter,
+  localAuth: localAuthRouter,
+  temporaryLoginLinks: temporaryLoginLinksRouter,
+  superadmin: superadminRouter,
 
   // TODO: add feature routers here, e.g.
   // todo: router({

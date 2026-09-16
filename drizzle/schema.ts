@@ -49,6 +49,33 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
+/** Server-only credential state for local email/password authentication. */
+export const localAuthCredentials = mysqlTable(
+  "localAuthCredentials",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull().references(() => users.id),
+    emailNormalized: varchar("emailNormalized", { length: 320 }).notNull(),
+    passwordHash: text("passwordHash").notNull(),
+    passwordVersion: int("passwordVersion").default(1).notNull(),
+    mustChangePassword: int("mustChangePassword").default(0).notNull(),
+    failedAttempts: int("failedAttempts").default(0).notNull(),
+    lockedUntil: bigint("lockedUntil", { mode: "number" }),
+    lastFailedAt: bigint("lastFailedAt", { mode: "number" }),
+    lastPasswordChangedAt: bigint("lastPasswordChangedAt", { mode: "number" }).notNull(),
+    resetTokenHash: varchar("resetTokenHash", { length: 128 }),
+    resetExpiresAt: bigint("resetExpiresAt", { mode: "number" }),
+    resetUsedAt: bigint("resetUsedAt", { mode: "number" }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    uniqueIndex("local_auth_user_uq").on(table.userId),
+    uniqueIndex("local_auth_email_uq").on(table.emailNormalized),
+    index("local_auth_reset_idx").on(table.resetTokenHash, table.resetExpiresAt),
+  ],
+);
+
 export const entities = mysqlTable(
   "entities",
   {
@@ -491,12 +518,54 @@ export const handovers = mysqlTable(
     risks: text("risks"),
     outstandingActions: text("outstandingActions"),
     sensitivity: mysqlEnum("sensitivity", ["operational", "safeguarding", "restricted"]).default("operational").notNull(),
+    templateCode: varchar("templateCode", { length: 80 }),
+    structuredBriefCiphertext: text("structuredBriefCiphertext"),
+    dictatedTextCiphertext: text("dictatedTextCiphertext"),
+    dictatedReviewState: mysqlEnum("dictatedReviewState", ["not_required", "pending_review", "reviewed", "approved", "returned"]).default("not_required").notNull(),
+    reviewedBy: int("reviewedBy").references(() => users.id),
+    reviewedAt: bigint("reviewedAt", { mode: "number" }),
+    approvedBy: int("approvedBy").references(() => users.id),
+    approvedAt: bigint("approvedAt", { mode: "number" }),
+    reviewNotesCiphertext: text("reviewNotesCiphertext"),
     acknowledgedAt: bigint("acknowledgedAt", { mode: "number" }),
     acknowledgedBy: int("acknowledgedBy").references(() => users.id),
     createdBy: int("createdBy").notNull().references(() => users.id),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => [index("handover_property_idx").on(table.propertyId, table.createdAt)],
+);
+
+/** Append-only manager review events for dictated or structured handover text. */
+export const handoverReviewEvents = mysqlTable(
+  "handoverReviewEvents",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    entityId: int("entityId").notNull().references(() => entities.id),
+    handoverId: int("handoverId").notNull().references(() => handovers.id),
+    decision: mysqlEnum("decision", ["reviewed", "approved", "returned"]).notNull(),
+    notesCiphertext: text("notesCiphertext"),
+    createdBy: int("createdBy").notNull().references(() => users.id),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => [index("handover_review_event_idx").on(table.handoverId, table.createdAt)],
+);
+
+/** Individual, immutable receipt that an incoming worker read a previous shift handover. */
+export const handoverAcknowledgements = mysqlTable(
+  "handoverAcknowledgements",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    entityId: int("entityId").notNull().references(() => entities.id),
+    handoverId: int("handoverId").notNull().references(() => handovers.id),
+    shiftId: int("shiftId").notNull().references(() => shifts.id),
+    userId: int("userId").notNull().references(() => users.id),
+    acknowledgedAt: bigint("acknowledgedAt", { mode: "number" }).notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("handover_acknowledgement_uq").on(table.handoverId, table.shiftId, table.userId),
+    index("handover_acknowledgement_user_idx").on(table.userId, table.acknowledgedAt),
+  ],
 );
 
 export const keyWorkerReports = mysqlTable(
@@ -511,6 +580,8 @@ export const keyWorkerReports = mysqlTable(
     reportDate: bigint("reportDate", { mode: "number" }).notNull(),
     mood: varchar("mood", { length: 80 }),
     attitude: varchar("attitude", { length: 120 }),
+    learning: text("learning"),
+    enthusiasm: varchar("enthusiasm", { length: 120 }),
     discussions: text("discussions"),
     pointsToNote: text("pointsToNote"),
     plan: text("plan"),
@@ -1048,6 +1119,31 @@ export const guestInvitations = mysqlTable(
     uniqueIndex("guest_invitation_token_uq").on(table.tokenHash),
     index("guest_invitation_entity_idx").on(table.entityId, table.createdAt),
     index("guest_invitation_expiry_idx").on(table.expiresAt),
+  ],
+);
+
+/**
+ * Hash-only, one-time temporary sign-in links for existing local accounts.
+ * Membership and property scope are deliberately not copied here: access is
+ * always recalculated from the live account and membership records at redeem.
+ */
+export const temporaryLoginLinks = mysqlTable(
+  "temporaryLoginLinks",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    entityId: int("entityId").notNull().references(() => entities.id),
+    targetUserId: int("targetUserId").notNull().references(() => users.id),
+    tokenHash: varchar("tokenHash", { length: 128 }).notNull(),
+    expiresAt: bigint("expiresAt", { mode: "number" }).notNull(),
+    redeemedAt: bigint("redeemedAt", { mode: "number" }),
+    revokedAt: bigint("revokedAt", { mode: "number" }),
+    createdBy: int("createdBy").notNull().references(() => users.id),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  },
+  table => [
+    uniqueIndex("temporary_login_link_token_uq").on(table.tokenHash),
+    index("temporary_login_link_recipient_idx").on(table.entityId, table.targetUserId, table.expiresAt),
+    index("temporary_login_link_expiry_idx").on(table.expiresAt),
   ],
 );
 

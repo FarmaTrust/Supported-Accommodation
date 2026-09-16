@@ -17,7 +17,6 @@ const WorkPlansPage = lazy(() => import("./pages/WorkPlans"));
 const FinancePage = lazy(() => import("./pages/Finance"));
 const InvoiceDetailPage = lazy(() => import("./pages/InvoiceDetail"));
 const DocumentsPage = lazy(() => import("./pages/Documents"));
-const KeyWorkerPage = lazy(() => import("./pages/KeyWorker"));
 const SearchPage = lazy(() => import("./pages/Search"));
 const SharePackPage = lazy(() => import("./pages/SharePack"));
 const InvoiceSharePage = lazy(() => import("./pages/InvoiceShare"));
@@ -32,8 +31,11 @@ const GovernanceHubPage = lazy(() => import("./pages/GovernanceHub"));
 const StaffWorkspacePage = lazy(() => import("./pages/StaffWorkspace"));
 const ManagerAppPage = lazy(() => import("./pages/ManagerApp"));
 const KeyWorkerAppPage = lazy(() => import("./pages/KeyWorkerApp"));
+const KeyWorkerPage = lazy(() => import("./pages/KeyWorker"));
 const AccessControlPage = lazy(() => import("./pages/AccessControl"));
 const GuestInvitationPage = lazy(() => import("./pages/GuestInvitation"));
+const TemporaryLoginLinkPage = lazy(() => import("./pages/TemporaryLoginLink"));
+const SuperadminPage = lazy(() => import("./pages/Superadmin"));
 
 function Router() {
   return (
@@ -42,6 +44,7 @@ function Router() {
         <Route path={"/share/:token"} component={SharePackPage} />
         <Route path={"/invoice-share/:token"} component={InvoiceSharePage} />
         <Route path={"/guest/:token"} component={GuestInvitationPage} />
+        <Route path={"/access/temporary/:token"} component={TemporaryLoginLinkPage} />
         <Route>
           <DashboardLayout>
             <Switch>
@@ -53,6 +56,7 @@ function Router() {
           <Route path={"/manager-app"} component={ManagerAppPage} />
           <Route path={"/keyworker-app"} component={KeyWorkerAppPage} />
           <Route path={"/access-control"} component={AccessControlPage} />
+          <Route path={"/superadmin"} component={SuperadminPage} />
           <Route path={"/placements"} component={PlacementsPage} />
           <Route path={"/rota"} component={RotaPage} />
           <Route path={"/compliance"} component={CompliancePage} />

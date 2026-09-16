@@ -8,18 +8,16 @@ flowchart TB
     Webhook[External webhook sender]
   end
 
-  subgraph IDENTITY[Identity and edge boundary]
+  subgraph IDENTITY[Local authentication and edge boundary]
     Browser[HTTPS browser session]
-    IdP[Current delegated identity provider
-Passwordless authentication]
-    IdPAdmin[IdP admin console
-MFA, account lifecycle, conditional access]
+    Login[Local email and password sign-in
+MySQL credential verification]
+    Bootstrap[One-time owner bootstrap
+secure token and strong password]
     Edge[Managed edge
 TLS, WAF, rate limit, CSP]
-    OAuth[OAuth callback
-one-time nonce and fixed return route]
     Session[Signed secure session cookie
-Bearer fallback for constrained preview clients]
+HTTP-only, version-revocable]
   end
 
   subgraph HUB[Supported Accommodation Hub modular monolith]
@@ -30,7 +28,7 @@ active user, membership, role, capability,
 property scope and placement assignment]
     Provision[Colleague provisioning module
 email pre-authorisation, pending scope,
-post-provider-sign-in activation, revocation]
+company-admin credential issue and revocation]
     Core[Accommodation, placement and operations
 entities, properties, units, occupancy,
 rota, timesheets and workflow]
@@ -90,11 +88,11 @@ only for approved active connections]
   Manager --> Browser
   Worker --> Browser
   Guest --> Edge
-  Admin --> IdPAdmin
+  Admin --> Bootstrap
   Browser --> Edge
-  Browser -. passwordless sign-in .-> IdP
-  IdP --> OAuth
-  OAuth --> Session
+  Browser --> Login
+  Login --> Session
+  Bootstrap --> Session
   Session --> Edge
   Edge --> BFF
   Webhook --> Edge

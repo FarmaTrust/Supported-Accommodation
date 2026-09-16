@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { complianceObligations, documents, entities, entityMemberships, localAuthorities, occupancyEvents, properties, propertyEvidence, propertyUnits, users, workPlanActions } from "../../drizzle/schema";
-import { assertEntityCapability, assertPropertyCapability, getUserAccess, listAccessiblePropertyIds } from "../authz";
+import { complianceObligations, documents, entities, entityMemberships, localAuthorities, occupancyEvents, placements, properties, propertyEvidence, propertyUnits, users, workPlanActions, youngPeople } from "../../drizzle/schema";
+import { assertEntityCapability, assertPlacementCapability, assertPropertyCapability, getUserAccess, listAccessiblePropertyIds } from "../authz";
 import { protectedProcedure, router } from "../_core/trpc";
 import { writeAuditEvent } from "../services/audit";
 import { encryptSensitive } from "../services/crypto";
@@ -129,6 +129,41 @@ export const entitiesRouter = router({
       db.select().from(occupancyEvents).where(eq(occupancyEvents.propertyId, input.propertyId)).orderBy(desc(occupancyEvents.effectiveAt)).limit(50),
     ]);
     return { property, units, history };
+  }),
+
+  unitOccupancy: protectedProcedure.input(z.object({
+    entityId: z.number().int().positive(), propertyId: z.number().int().positive(), unitId: z.number().int().positive(),
+  })).query(async ({ ctx, input }) => {
+    await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "property.read");
+    const db = await requireDb();
+    const [unit] = await db.select({ id: propertyUnits.id, label: propertyUnits.label, status: propertyUnits.status })
+      .from(propertyUnits).where(and(eq(propertyUnits.id, input.unitId), eq(propertyUnits.propertyId, input.propertyId))).limit(1);
+    if (!unit) throw new Error("This room is not available at the selected property.");
+    if (unit.status !== "occupied") {
+      await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: input.propertyId, action: "unit_occupancy.read", resourceType: "property_unit", resourceId: unit.id, result: "allowed", reasonCode: "unit_not_occupied" });
+      return { state: "not_occupied" as const, unit };
+    }
+    const [event] = await db.select({ placementId: occupancyEvents.placementId, eventType: occupancyEvents.eventType })
+      .from(occupancyEvents).where(and(eq(occupancyEvents.entityId, input.entityId), eq(occupancyEvents.propertyId, input.propertyId), eq(occupancyEvents.unitId, input.unitId)))
+      .orderBy(desc(occupancyEvents.effectiveAt), desc(occupancyEvents.id)).limit(1);
+    if (!event?.placementId || event.eventType !== "move_in") {
+      await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: input.propertyId, action: "unit_occupancy.read", resourceType: "property_unit", resourceId: unit.id, result: "allowed", reasonCode: "assignment_not_recorded" });
+      return { state: "assignment_not_recorded" as const, unit };
+    }
+    const { placement } = await assertPlacementCapability(ctx.user.id, event.placementId, "young_person.read");
+    if (placement.entityId !== input.entityId || placement.propertyId !== input.propertyId || placement.status !== "active") {
+      await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: input.propertyId, action: "unit_occupancy.read", resourceType: "property_unit", resourceId: unit.id, sensitivity: "safeguarding", result: "allowed", reasonCode: "assignment_not_current", metadata: { placementId: event.placementId } });
+      return { state: "assignment_not_current" as const, unit };
+    }
+    const [resident] = await db.select({ placementId: placements.id, reference: youngPeople.reference, preferredName: youngPeople.preferredName, placementStartAt: placements.startAt })
+      .from(placements).innerJoin(youngPeople, eq(youngPeople.id, placements.youngPersonId))
+      .where(and(eq(placements.id, event.placementId), eq(placements.entityId, input.entityId), eq(placements.propertyId, input.propertyId), eq(placements.status, "active"))).limit(1);
+    if (!resident) {
+      await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: input.propertyId, action: "unit_occupancy.read", resourceType: "property_unit", resourceId: unit.id, sensitivity: "safeguarding", result: "allowed", reasonCode: "assignment_not_current", metadata: { placementId: event.placementId } });
+      return { state: "assignment_not_current" as const, unit };
+    }
+    await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: input.propertyId, action: "unit_occupancy.resident.read", resourceType: "property_unit", resourceId: unit.id, sensitivity: "safeguarding", result: "allowed", reasonCode: "property_and_placement_scope_verified", metadata: { placementId: resident.placementId } });
+    return { state: "assigned" as const, unit, resident };
   }),
 
   propertyEvidence: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), propertyId: z.number().int().positive() })).query(async ({ ctx, input }) => {

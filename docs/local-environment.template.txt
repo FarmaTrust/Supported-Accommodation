@@ -5,14 +5,12 @@
 # Server-only secrets
 DATABASE_URL=mysql://USER:PASSWORD@HOST:3306/DATABASE
 JWT_SECRET=replace-with-a-strong-random-development-only-secret
-OAUTH_SERVER_URL=https://your-authorised-oauth-service.example
+# Required once to establish the first local owner account; rotate or remove after use.
+LOCAL_AUTH_BOOTSTRAP_TOKEN=replace-with-a-strong-random-one-time-bootstrap-token
+
+# Optional managed platform services used by storage and other enabled integrations.
 BUILT_IN_FORGE_API_URL=https://your-authorised-forge-service.example
 BUILT_IN_FORGE_API_KEY=replace-with-development-only-api-key
-OWNER_OPEN_ID=replace-with-authorised-development-owner-open-id
-
-# Browser-visible OAuth configuration (public identifier and endpoint only)
-VITE_APP_ID=replace-with-public-development-oauth-application-id
-VITE_OAUTH_PORTAL_URL=https://your-authorised-oauth-portal.example
 
 # Optional browser-visible application presentation
 VITE_APP_TITLE=Supported Accommodation Hub

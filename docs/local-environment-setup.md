@@ -12,13 +12,13 @@ cp docs/local-environment.template.txt .env.local
 
 | Variable group | Used by | Handling requirement |
 |---|---|---|
-| `DATABASE_URL`, `JWT_SECRET`, `BUILT_IN_FORGE_API_KEY` | Server only | Treat as secrets; never prefix them with `VITE_`, commit them, or paste them into tickets/chat. |
-| `OAUTH_SERVER_URL`, `OWNER_OPEN_ID` | Server only | Obtain from the authorised identity/deployment administrator. |
-| `VITE_APP_ID`, `VITE_OAUTH_PORTAL_URL` | Browser and server sign-in flow | These are public configuration identifiers/endpoints, not password or token values. |
+| `DATABASE_URL`, `JWT_SECRET`, `LOCAL_AUTH_BOOTSTRAP_TOKEN`, `BUILT_IN_FORGE_API_KEY` | Server only | Treat as secrets; never prefix them with `VITE_`, commit them, or paste them into tickets/chat. |
+| `LOCAL_AUTH_BOOTSTRAP_TOKEN` | Server only | A one-time, high-entropy setup token used only to establish the first local owner email/password account. Rotate or remove it after that account is confirmed. |
+| `BUILT_IN_FORGE_API_URL` | Server only | Development endpoint for enabled managed platform services such as object storage. |
 | `VITE_APP_TITLE`, `VITE_APP_LOGO` | Browser presentation | Optional application branding values. |
 
 ## Development and Deployment
 
-The managed Hub deployment receives its environment securely and does not load `.env.example`. Do not add a real `.env` to source control or change deployment secrets by editing files. When a real credential must be added or rotated, use the secure project configuration flow so development and production retain the same typed environment contract.
+The managed Hub deployment receives its environment securely and does not load the sanitised text template. Do not add a real `.env` to source control or change deployment secrets by editing files. When a real credential must be added or rotated, use the secure project configuration flow so development and production retain the same typed environment contract.
 
-> A successful local sign-in also requires the identity provider to permit the local callback origin. Preserve the existing nonce-bound callback flow; do not create a second callback or add a password-based fallback in the Hub.
+> Local sign-in uses the MySQL credential store. The first owner must use the one-time bootstrap token with their approved email and a strong password. Never place a bootstrap token or a password in source control, a ticket, email or chat.

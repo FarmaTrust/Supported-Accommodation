@@ -2,6 +2,7 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { requiresLocalPasswordChange } from "../services/localAuth";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -34,7 +35,18 @@ const requireUser = t.middleware(async opts => {
   });
 });
 
-export const protectedProcedure = t.procedure.use(requireUser);
+export const credentialChangeProcedure = t.procedure.use(requireUser);
+
+const requirePasswordRotation = t.middleware(async opts => {
+  const user = opts.ctx.user;
+  if (!user) throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
+  if (await requiresLocalPasswordChange(user.id)) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "Update your temporary password before accessing operational records." });
+  }
+  return opts.next();
+});
+
+export const protectedProcedure = t.procedure.use(requireUser).use(requirePasswordRotation);
 
 export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {

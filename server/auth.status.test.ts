@@ -14,11 +14,11 @@ function createContext(authIssue?: TrpcContext["authIssue"]): TrpcContext {
 describe("auth.status", () => {
   it("returns a safe session issue without session or provider detail", async () => {
     const result = await appRouter.createCaller(createContext("AUTH_SESSION_INVALID")).auth.status();
-    expect(result).toEqual({ user: null, issue: "AUTH_SESSION_INVALID" });
+    expect(result).toEqual({ user: null, issue: "AUTH_SESSION_INVALID", passwordChangeRequired: false });
   });
 
   it("does not present a normal signed-out state as a failure", async () => {
     const result = await appRouter.createCaller(createContext()).auth.status();
-    expect(result).toEqual({ user: null, issue: null });
+    expect(result).toEqual({ user: null, issue: null, passwordChangeRequired: false });
   });
 });

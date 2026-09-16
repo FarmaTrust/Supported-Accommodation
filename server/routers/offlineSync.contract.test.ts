@@ -24,6 +24,10 @@ describe("offline sync contract", () => {
     for (const payload of payloads) expect(offlineSyncItemSchema.safeParse(payload).success, payload.operation).toBe(true);
   });
 
+  it("allows the guided learning and enthusiasm fields without broadening the offline payload", () => {
+    expect(offlineSyncItemSchema.safeParse({ ...report, payload: { ...report.payload, learning: "Completed a budgeting activity with prompts.", enthusiasm: "Engaged after choosing the activity." } }).success).toBe(true);
+  });
+
   it("rejects broad cached case data, unsupported versions and unknown fields", () => {
     expect(offlineSyncItemSchema.safeParse({ ...report, cachedYoungPerson: { name: "not permitted" } }).success).toBe(false);
     expect(offlineSyncItemSchema.safeParse({ ...report, clientVersion: 2 }).success).toBe(false);

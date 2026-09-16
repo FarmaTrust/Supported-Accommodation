@@ -195,7 +195,7 @@
     @apply text-[0.68rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground;
   }
   .page-title {
-    @apply text-3xl font-extrabold tracking-[-0.045em] text-foreground sm:text-4xl;
+    @apply text-2xl font-extrabold tracking-[-0.045em] text-foreground sm:text-4xl;
   }
   .thin-copy {
     @apply text-sm font-normal leading-6 text-muted-foreground;
@@ -203,11 +203,33 @@
   .hairline {
     @apply border border-border/70;
   }
+  .operational-row {
+    @apply flex min-h-16 items-center gap-3 px-3 py-2.5 sm:min-h-[4.25rem] sm:px-4 sm:py-3;
+  }
+  .operational-row-action {
+    @apply w-full text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring;
+  }
   .geometry-blue {
     background: oklch(0.900 0.052 244);
   }
   .geometry-blush {
     background: oklch(0.915 0.050 18);
+  }
+}
+
+@media (max-width: 639px) {
+  input, textarea, [data-slot="input"], [data-slot="textarea"], [role="combobox"] {
+    text-align: left;
+    font-size: 1rem;
+  }
+
+  textarea, [data-slot="textarea"] {
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  .page-title, .thin-copy, .operational-row p, .surface p {
+    overflow-wrap: anywhere;
   }
 }
 

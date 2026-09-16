@@ -1,12 +1,12 @@
-# Guest Invitations and Passwordless Sign-In
+# Guest Invitations and Local Sign-In
 
 ## Purpose
 
-The Hub now offers two distinct, secure entry mechanisms. **Passwordless secure sign-in** remains the normal route for staff and uses the configured identity provider through the existing nonce-bound OAuth flow. **Guest invitations** are deliberately narrower: a company administrator can create a time-limited, revocable link for a single property’s basic summary. A guest invitation does not create a Hub user account, entity membership, operational role or reusable session.
+The Hub now offers two distinct, secure entry mechanisms. **Local email-and-password sign-in** is the normal route for staff and is backed by a MySQL credential store. **Guest invitations** are deliberately narrower: a company administrator can create a time-limited, revocable link for a single property’s basic summary. A guest invitation does not create a Hub user account, entity membership, operational role or reusable session.
 
 | Mechanism | Who can use it | What it allows | What it never allows |
 |---|---|---|---|
-| Passwordless secure sign-in | Approved staff authenticated by the identity provider | Normal server-authorised role, company, property and placement access | Direct Hub password storage, local password resets, or bypass of tenant/role checks |
+| Local email-and-password sign-in | Approved staff with a company-issued local credential | Normal server-authorised role, company, property and placement access | Plaintext passwords, self-service role changes, or bypass of tenant/role checks |
 | Guest invitation | Anyone holding a valid, unrevoked invitation | One selected property’s read-only basic summary | Young-person or placement data; safeguarding, health, HR, rota, finance, documents, audit records, admin controls or another company’s information |
 
 ## Operating Guest Invitations
@@ -17,11 +17,11 @@ The Hub stores only a SHA-256 hash of the opaque 32-byte token. The plaintext to
 
 Administrators can revoke an active link from the same Access control panel. Revocation takes effect immediately. A guest sees one generic unavailable message for a missing, expired, revoked or exhausted link, so the response does not disclose tenant, property or invitation information.
 
-## Passwordless Sign-In Boundaries
+## Local Sign-In Boundaries
 
-The Hub delegates identity verification to its configured identity provider; it does not store a password or implement its own reset mechanism. The sign-in entry point preserves the existing browser-bound one-time nonce, callback-state validation and fixed in-app return route. Organisations must configure a passwordless option with their identity provider if they require email magic links, passkeys or a similar method; this implementation does **not** claim to send email magic links itself.
+The Hub stores a salted, one-way scrypt password hash and normalised email address in MySQL. It validates credentials server-side, returns generic failure messages, locks repeated failures temporarily and records restricted authentication audit events. Company membership, role, property scope and assignment scope remain separate server-authoritative checks after sign-in.
 
-Browsers that block required cookies, including Safari Private Browsing and strict tracking/privacy modes, may prevent the identity-provider sign-in flow from completing. The sign-in page provides safe provider recovery and support-request routes without exposing credentials, raw provider hostnames, tenant details or session diagnostics.
+The initial owner uses a one-time `LOCAL_AUTH_BOOTSTRAP_TOKEN` to set a strong local password. Company administrators issue colleague credentials and time-limited one-time reset links through Access control. The Hub does not yet send reset email automatically; administrators must use an approved secure delivery channel.
 
 ## Security Review Checklist
 
@@ -33,7 +33,7 @@ Browsers that block required cookies, including Safari Private Browsing and stri
 | Expiry, revocation and bounded-use enforcement | Server-side, including an atomic conditional use-count update |
 | Sensitive-domain exclusion | Guest endpoint returns only an allowlisted property summary payload |
 | Audit evidence without token disclosure | Restricted create, redeem, revoke and denial events are recorded |
-| Passwordless sign-in integrity | Existing nonce-bound identity-provider flow preserved |
+| Local sign-in integrity | Salted one-way password hashes, generic login errors, session-version revocation and one-time bootstrap token controls |
 
 ## Support Handling
 

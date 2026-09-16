@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { entities, entityMemberships, properties, propertyAssignments, staffProfiles, users } from "../../drizzle/schema";
+import { entities, entityMemberships, localAuthCredentials, properties, propertyAssignments, staffProfiles, users } from "../../drizzle/schema";
 import { assertEntityCapability, type OperationalRole } from "../authz";
 import { protectedProcedure, router } from "../_core/trpc";
 import { writeAuditEvent } from "../services/audit";
@@ -18,7 +18,7 @@ export const accessControlRouter = router({
     const db = await requireDb();
     const [[entity], membershipRows, propertyRows, grantRows, profileRows] = await Promise.all([
       db.select({ supportContactName: entities.supportContactName, supportEmail: entities.supportEmail, supportPhone: entities.supportPhone, supportGuidance: entities.supportGuidance }).from(entities).where(eq(entities.id, input.entityId)).limit(1),
-      db.select({ id: entityMemberships.id, userId: entityMemberships.userId, role: entityMemberships.operationalRole, allProperties: entityMemberships.allProperties, extraCapabilities: entityMemberships.extraCapabilities, status: entityMemberships.status, startsAt: entityMemberships.startsAt, endsAt: entityMemberships.endsAt, updatedAt: entityMemberships.updatedAt, name: users.name, email: users.email, accountStatus: users.accountStatus }).from(entityMemberships).innerJoin(users, eq(users.id, entityMemberships.userId)).where(eq(entityMemberships.entityId, input.entityId)).orderBy(asc(users.name)),
+      db.select({ id: entityMemberships.id, userId: entityMemberships.userId, role: entityMemberships.operationalRole, allProperties: entityMemberships.allProperties, extraCapabilities: entityMemberships.extraCapabilities, status: entityMemberships.status, startsAt: entityMemberships.startsAt, endsAt: entityMemberships.endsAt, updatedAt: entityMemberships.updatedAt, name: users.name, email: users.email, accountStatus: users.accountStatus, localCredentialUserId: localAuthCredentials.userId }).from(entityMemberships).innerJoin(users, eq(users.id, entityMemberships.userId)).leftJoin(localAuthCredentials, eq(localAuthCredentials.userId, users.id)).where(eq(entityMemberships.entityId, input.entityId)).orderBy(asc(users.name)),
       db.select({ id: properties.id, name: properties.name, addressLine1: properties.addressLine1, postcode: properties.postcode, status: properties.status }).from(properties).where(eq(properties.entityId, input.entityId)).orderBy(asc(properties.name)),
       db.select({ userId: propertyAssignments.userId, propertyId: propertyAssignments.propertyId, assignmentType: propertyAssignments.assignmentType }).from(propertyAssignments).where(eq(propertyAssignments.entityId, input.entityId)),
       db.select({ userId: staffProfiles.userId, jobTitle: staffProfiles.jobTitle, staffStatus: staffProfiles.status }).from(staffProfiles).where(eq(staffProfiles.entityId, input.entityId)),
@@ -31,7 +31,7 @@ export const accessControlRouter = router({
       capabilities: MANAGEABLE_CAPABILITIES.map(value => ({ value, label: CAPABILITY_LABELS[value] })),
       supportContact: entity ?? { supportContactName: null, supportEmail: null, supportPhone: null, supportGuidance: null },
       properties: propertyRows,
-      members: membershipRows.map(item => ({ ...item, allProperties: item.allProperties === 1, extraCapabilities: cleanExtras(item.extraCapabilities), propertyGrants: grantsByUser.get(item.userId) ?? [], staffProfile: profileByUser.get(item.userId) ?? null })),
+      members: membershipRows.map(item => ({ ...item, hasLocalCredential: item.localCredentialUserId !== null, allProperties: item.allProperties === 1, extraCapabilities: cleanExtras(item.extraCapabilities), propertyGrants: grantsByUser.get(item.userId) ?? [], staffProfile: profileByUser.get(item.userId) ?? null })),
     };
   }),
 

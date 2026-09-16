@@ -1,19 +1,32 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import {TRPCError} from "@trpc/server";
 import { z } from "zod";
-import { clockEvents, entityMemberships, handovers, properties, propertyAssignments, shiftChangeAcknowledgements, shiftChangeEvents, shiftRequests, shifts, staffAvailability, staffProfiles, timesheetEntries, timesheets, users, workforceChecks, workingTimePolicies } from "../../drizzle/schema";
+import { clockEvents, entityMemberships, handoverAcknowledgements, handoverReviewEvents, handovers, notifications, properties, propertyAssignments, shiftChangeAcknowledgements, shiftChangeEvents, shiftRequests, shifts, staffAvailability, staffProfiles, timesheetEntries, timesheets, users, workforceChecks, workingTimePolicies } from "../../drizzle/schema";
 import { assertEntityCapability, assertPropertyCapability, getUserAccess, listAccessiblePropertyIds } from "../authz";
 import { protectedProcedure, router } from "../_core/trpc";
 import { writeAuditEvent } from "../services/audit";
 import { calculateDistanceMetres } from "../services/rules";
 import {assertValidDateRange} from "../services/inputValidation";
 import {evaluateWorkingTime} from "../services/rotaPolicyRules";
-import {encryptSensitive} from "../services/crypto";
+import {decryptSensitive,encryptSensitive} from "../services/crypto";
 import {isStaleCalendarVersion,requireCalendarOverride} from "../services/rotaCalendarRules";
 import { requireDb } from "./shared";
 import { requireAttendanceOverride } from "../services/workspaceGuards";
+import { assertIncomingHandoverCanBeAcknowledged } from "../services/handoverAcknowledgementRules";
+import { pendingShiftStartHandoverReminders } from "../services/handoverShiftStartReminders";
 
 type Db = Awaited<ReturnType<typeof requireDb>>;
+const SHIFT_BRIEF_TEMPLATES = [
+  { code: "nursing_general", label: "Nursing shift handover", fields: ["Clinical observations", "Medication and administration", "Care delivered", "Risks and escalation", "Outstanding actions"] },
+  { code: "nursing_night", label: "Night shift handover", fields: ["Night observations", "Sleep and welfare", "Medication and checks", "Incidents or risks", "Morning actions"] },
+  { code: "operational", label: "Operational shift handover", fields: ["Shift summary", "People and property updates", "Risks", "Actions due", "Manager escalation"] },
+] as const;
+
+async function assertHandoverReviewer(userId: number, entityId: number) {
+  const access = await assertEntityCapability(userId, entityId, "shift.write");
+  if (!["owner", "registered_manager"].includes(access.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Manager approval is required." });
+  return access;
+}
 async function assignmentWarnings(db: Db, entityId: number, userId: number, candidate: { id?: number; startsAt: number; endsAt: number; requiredRole?: string | null }) {
   const warnings: string[] = []; const assigned = await db.select().from(shifts).where(and(eq(shifts.entityId, entityId), eq(shifts.assignedUserId, userId)));
   for (const other of assigned.filter(item => item.id !== candidate.id && item.status !== "cancelled")) { const overlaps = candidate.startsAt < other.endsAt && candidate.endsAt > other.startsAt; const restBefore = candidate.startsAt >= other.endsAt ? candidate.startsAt - other.endsAt : Number.POSITIVE_INFINITY; const restAfter = other.startsAt >= candidate.endsAt ? other.startsAt - candidate.endsAt : Number.POSITIVE_INFINITY; if (overlaps) warnings.push(`Overlaps shift #${other.id}`); else if (Math.min(restBefore, restAfter) < 11 * 3_600_000) warnings.push(`Less than 11 hours rest around shift #${other.id}`); }
@@ -44,11 +57,51 @@ async function refreshPropertyCoverage(db: Db, propertyId: number) {
 }
 
 export const operationsRouter = router({
+  handoverTemplates: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    await assertEntityCapability(ctx.user.id, input.entityId, "shift.read");
+    return SHIFT_BRIEF_TEMPLATES;
+  }),
   shifts: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
     const propertyIds = await listAccessiblePropertyIds(ctx.user.id, input.entityId, "shift.read");
     if (!propertyIds.length) return [];
     const db = await requireDb();
-    return db.select().from(shifts).where(and(eq(shifts.entityId, input.entityId), inArray(shifts.propertyId, propertyIds))).orderBy(asc(shifts.startsAt));
+    const shiftRows = await db.select().from(shifts).where(and(eq(shifts.entityId, input.entityId), inArray(shifts.propertyId, propertyIds))).orderBy(asc(shifts.startsAt));
+    const activeAssignedShifts = shiftRows.filter(shift => shift.assignedUserId === ctx.user.id && shift.status !== "cancelled" && shift.startsAt <= Date.now() && shift.endsAt >= Date.now());
+    if (!activeAssignedShifts.length) return shiftRows;
+
+    const [handoverRows, acknowledgementRows] = await Promise.all([
+      db.select({ id: handovers.id, entityId: handovers.entityId, propertyId: handovers.propertyId, shiftId: handovers.shiftId, createdBy: handovers.createdBy, createdAt: handovers.createdAt })
+        .from(handovers)
+        .where(and(eq(handovers.entityId, input.entityId), inArray(handovers.propertyId, propertyIds))),
+      db.select({ handoverId: handoverAcknowledgements.handoverId, shiftId: handoverAcknowledgements.shiftId, userId: handoverAcknowledgements.userId })
+        .from(handoverAcknowledgements)
+        .where(eq(handoverAcknowledgements.userId, ctx.user.id)),
+    ]);
+    const reminders = pendingShiftStartHandoverReminders({ now: Date.now(), userId: ctx.user.id, shifts: activeAssignedShifts, handovers: handoverRows, acknowledgements: acknowledgementRows });
+    const existingReminderRows = reminders.length ? await db.select({ dedupeKey: notifications.dedupeKey }).from(notifications)
+      .where(and(eq(notifications.userId, ctx.user.id), inArray(notifications.dedupeKey, reminders.map(reminder => reminder.dedupeKey)))) : [];
+    const existingReminderKeys = new Set(existingReminderRows.map(row => row.dedupeKey));
+    for (const reminder of reminders) {
+      await db.insert(notifications).values({
+        entityId: reminder.entityId,
+        userId: reminder.recipientUserId,
+        type: "handover_acknowledgement",
+        title: "Incoming handover acknowledgement",
+        message: "Read and acknowledge the previous-shift handover before continuing this shift.",
+        severity: "warning",
+        resourceType: "handover",
+        resourceId: reminder.handoverId,
+        deepLink: "/keyworker-app",
+        dueAt: activeAssignedShifts.find(shift => shift.id === reminder.shiftId)?.startsAt,
+        acknowledgementRequired: 1,
+        escalationDueAt: Date.now() + 15 * 60_000,
+        dedupeKey: reminder.dedupeKey,
+      }).onDuplicateKeyUpdate({ set: { dedupeKey: sql`${notifications.dedupeKey}` } });
+      if (!existingReminderKeys.has(reminder.dedupeKey)) {
+        await writeAuditEvent({ actorType: "system", entityId: reminder.entityId, propertyId: reminder.propertyId, action: "handover.shift_start_reminder", resourceType: "handover", resourceId: reminder.handoverId, sensitivity: "general", result: "success", metadata: { shiftId: reminder.shiftId, recipientUserId: reminder.recipientUserId } });
+      }
+    }
+    return shiftRows;
   }),
 
   calendarWorkers:protectedProcedure.input(z.object({entityId:z.number().int().positive(),propertyId:z.number().int().positive()})).query(async({ctx,input})=>{await assertPropertyCapability(ctx.user.id,input.entityId,input.propertyId,"shift.write");const db=await requireDb();const now=Date.now();const memberships=await db.select({userId:entityMemberships.userId,name:users.name,email:users.email,allProperties:entityMemberships.allProperties}).from(entityMemberships).innerJoin(users,eq(users.id,entityMemberships.userId)).where(and(eq(entityMemberships.entityId,input.entityId),eq(entityMemberships.operationalRole,"support_worker"),eq(entityMemberships.status,"active"),eq(users.accountStatus,"active"),or(isNull(entityMemberships.startsAt),lte(entityMemberships.startsAt,now)),or(isNull(entityMemberships.endsAt),gt(entityMemberships.endsAt,now))));const grants=await db.select({userId:propertyAssignments.userId}).from(propertyAssignments).where(and(eq(propertyAssignments.entityId,input.entityId),eq(propertyAssignments.propertyId,input.propertyId),eq(propertyAssignments.assignmentType,"worker"),or(isNull(propertyAssignments.startsAt),lte(propertyAssignments.startsAt,now)),or(isNull(propertyAssignments.endsAt),gt(propertyAssignments.endsAt,now))));const granted=new Set(grants.map(item=>item.userId));return memberships.filter(item=>Boolean(item.allProperties)||granted.has(item.userId));}),
@@ -140,20 +193,83 @@ export const operationsRouter = router({
     return { id: result.id, locationState, distanceMetres: distance };
   }),
 
-  handovers: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), propertyId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+  handovers: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), propertyId: z.number().int().positive(), shiftId: z.number().int().positive().optional() })).query(async ({ ctx, input }) => {
     await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "shift.read");
     const db = await requireDb();
-    return db.select().from(handovers).where(eq(handovers.propertyId, input.propertyId)).orderBy(asc(handovers.createdAt));
+    const rows = await db.select().from(handovers).where(and(eq(handovers.entityId, input.entityId), eq(handovers.propertyId, input.propertyId))).orderBy(asc(handovers.createdAt));
+    const ids = rows.map(row => row.id);
+    const [events, acknowledgements] = await Promise.all([
+      ids.length ? db.select({ id: handoverReviewEvents.id, handoverId: handoverReviewEvents.handoverId, decision: handoverReviewEvents.decision, notesCiphertext: handoverReviewEvents.notesCiphertext, createdAt: handoverReviewEvents.createdAt, reviewerName: users.name })
+        .from(handoverReviewEvents).innerJoin(users, eq(users.id, handoverReviewEvents.createdBy)).where(inArray(handoverReviewEvents.handoverId, ids)).orderBy(asc(handoverReviewEvents.createdAt)) : [],
+      ids.length && input.shiftId ? db.select({ handoverId: handoverAcknowledgements.handoverId, acknowledgedAt: handoverAcknowledgements.acknowledgedAt })
+        .from(handoverAcknowledgements).where(and(inArray(handoverAcknowledgements.handoverId, ids), eq(handoverAcknowledgements.shiftId, input.shiftId), eq(handoverAcknowledgements.userId, ctx.user.id))) : [],
+    ]);
+    const acknowledgementByHandover = new Map(acknowledgements.map(item => [item.handoverId, item.acknowledgedAt]));
+    return rows.map(row => ({
+      ...row,
+      structuredBrief: row.structuredBriefCiphertext ? decryptSensitive(row.structuredBriefCiphertext) : null,
+      dictatedText: row.dictatedTextCiphertext ? decryptSensitive(row.dictatedTextCiphertext) : null,
+      reviewNotes: row.reviewNotesCiphertext ? decryptSensitive(row.reviewNotesCiphertext) : null,
+      structuredBriefCiphertext: undefined,
+      dictatedTextCiphertext: undefined,
+      reviewNotesCiphertext: undefined,
+      acknowledgedForCurrentShiftAt: acknowledgementByHandover.get(row.id) ?? null,
+      reviewHistory: events.filter(event => event.handoverId === row.id).map(event => ({ ...event, notes: event.notesCiphertext ? decryptSensitive(event.notesCiphertext) : null, notesCiphertext: undefined })),
+    }));
+  }),
+
+  acknowledgeHandover: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), handoverId: z.number().int().positive(), shiftId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+    const db = await requireDb();
+    const [shiftRows, handoverRows] = await Promise.all([
+      db.select().from(shifts).where(and(eq(shifts.id, input.shiftId), eq(shifts.entityId, input.entityId))).limit(1),
+      db.select().from(handovers).where(and(eq(handovers.id, input.handoverId), eq(handovers.entityId, input.entityId))).limit(1),
+    ]);
+    const [shift] = shiftRows;
+    const [handover] = handoverRows;
+    if (!shift) throw new TRPCError({ code: "NOT_FOUND", message: "The current shift could not be found." });
+    if (!handover) throw new TRPCError({ code: "NOT_FOUND", message: "The handover could not be found." });
+    await assertPropertyCapability(ctx.user.id, input.entityId, shift.propertyId, "shift.read");
+    try { assertIncomingHandoverCanBeAcknowledged({ currentShift: shift, handover, userId: ctx.user.id }); }
+    catch (error) { throw new TRPCError({ code: "FORBIDDEN", message: error instanceof Error ? error.message : "This handover cannot be acknowledged." }); }
+    const [existing] = await db.select({ id: handoverAcknowledgements.id, acknowledgedAt: handoverAcknowledgements.acknowledgedAt }).from(handoverAcknowledgements)
+      .where(and(eq(handoverAcknowledgements.handoverId, handover.id), eq(handoverAcknowledgements.shiftId, shift.id), eq(handoverAcknowledgements.userId, ctx.user.id))).limit(1);
+    if (existing) return { success: true, alreadyAcknowledged: true, acknowledgedAt: existing.acknowledgedAt };
+    const acknowledgedAt = Date.now();
+    await db.insert(handoverAcknowledgements).values({ entityId: input.entityId, handoverId: handover.id, shiftId: shift.id, userId: ctx.user.id, acknowledgedAt })
+      .onDuplicateKeyUpdate({ set: { id: sql`${handoverAcknowledgements.id}` } });
+    await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: shift.propertyId, action: "handover.acknowledge", resourceType: "handover", resourceId: handover.id, sensitivity: handover.sensitivity === "operational" ? "general" : "safeguarding", result: "success", metadata: { shiftId: shift.id, acknowledgementType: "incoming_worker" } });
+    return { success: true, alreadyAcknowledged: false, acknowledgedAt };
   }),
 
   createHandover: protectedProcedure.input(z.object({
-    entityId: z.number().int().positive(), propertyId: z.number().int().positive(), shiftId: z.number().int().positive().optional(), summary: z.string().min(10).max(5000), risks: z.string().max(4000).optional(), outstandingActions: z.string().max(4000).optional(), sensitivity: z.enum(["operational", "safeguarding", "restricted"]).default("operational"),
+    entityId: z.number().int().positive(), propertyId: z.number().int().positive(), shiftId: z.number().int().positive().optional(), summary: z.string().min(10).max(5000), risks: z.string().max(4000).optional(), outstandingActions: z.string().max(4000).optional(), sensitivity: z.enum(["operational", "safeguarding", "restricted"]).default("operational"), templateCode: z.enum(["nursing_general", "nursing_night", "operational"]).optional(), structuredBrief: z.record(z.string().max(80), z.string().max(2000)).optional(), dictatedText: z.string().min(10).max(8000).optional(),
   })).mutation(async ({ ctx, input }) => {
     await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "shift.read");
     const db = await requireDb();
-    const [result] = await db.insert(handovers).values({ ...input, createdBy: ctx.user.id }).$returningId();
-    await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: input.propertyId, action: "handover.create", resourceType: "handover", resourceId: result.id, sensitivity: input.sensitivity === "operational" ? "general" : "safeguarding", result: "success" });
+    if (input.shiftId) {
+      const [shift] = await db.select().from(shifts).where(and(eq(shifts.id, input.shiftId), eq(shifts.entityId, input.entityId), eq(shifts.propertyId, input.propertyId))).limit(1);
+      if (!shift) throw new TRPCError({ code: "FORBIDDEN", message: "Shift scope does not match the selected property." });
+    }
+    const { structuredBrief, dictatedText, ...values } = input;
+    const [result] = await db.insert(handovers).values({ ...values, structuredBriefCiphertext: structuredBrief ? encryptSensitive(JSON.stringify(structuredBrief)) : undefined, dictatedTextCiphertext: dictatedText ? encryptSensitive(dictatedText) : undefined, dictatedReviewState: dictatedText ? "pending_review" : "not_required", createdBy: ctx.user.id }).$returningId();
+    await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: input.propertyId, action: "handover.create", resourceType: "handover", resourceId: result.id, sensitivity: input.sensitivity === "operational" ? "general" : "safeguarding", result: "success", metadata: { templateCode: input.templateCode ?? null, dictatedReviewState: dictatedText ? "pending_review" : "not_required" } });
     return { id: result.id };
+  }),
+
+  reviewHandover: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), handoverId: z.number().int().positive(), decision: z.enum(["reviewed", "approved", "returned"]), notes: z.string().trim().max(4000).optional() })).mutation(async ({ ctx, input }) => {
+    await assertHandoverReviewer(ctx.user.id, input.entityId);
+    if (input.decision === "returned" && (!input.notes || input.notes.length < 10)) throw new TRPCError({ code: "BAD_REQUEST", message: "Add a clear return reason of at least 10 characters." });
+    const db = await requireDb();
+    const [row] = await db.select().from(handovers).where(and(eq(handovers.id, input.handoverId), eq(handovers.entityId, input.entityId))).limit(1);
+    if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Handover not found." });
+    if (row.createdBy === ctx.user.id) throw new TRPCError({ code: "FORBIDDEN", message: "A different authorised manager must review this handover." });
+    const now = Date.now();
+    await db.transaction(async tx => {
+      await tx.update(handovers).set({ dictatedReviewState: input.decision, reviewedBy: ctx.user.id, reviewedAt: now, approvedBy: input.decision === "approved" ? ctx.user.id : row.approvedBy, approvedAt: input.decision === "approved" ? now : row.approvedAt, reviewNotesCiphertext: input.notes ? encryptSensitive(input.notes) : null }).where(eq(handovers.id, row.id));
+      await tx.insert(handoverReviewEvents).values({ entityId: input.entityId, handoverId: row.id, decision: input.decision, notesCiphertext: input.notes ? encryptSensitive(input.notes) : undefined, createdBy: ctx.user.id });
+    });
+    await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: row.propertyId, action: `handover.${input.decision}`, resourceType: "handover", resourceId: row.id, sensitivity: row.sensitivity === "operational" ? "general" : "safeguarding", result: "success", metadata: { dictatedTextReviewed: Boolean(row.dictatedTextCiphertext) } });
+    return { success: true, reviewedAt: now };
   }),
 
   timesheets: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
