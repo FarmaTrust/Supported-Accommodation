@@ -1,5 +1,7 @@
 ALTER TABLE `keyWorkerReports`
-  MODIFY COLUMN `status` enum('draft','submitted','reviewed','returned','approved','locked') NOT NULL DEFAULT 'draft',
+  MODIFY COLUMN `status` enum('draft','submitted','reviewed','returned','approved','locked') NOT NULL DEFAULT 'draft';
+--> statement-breakpoint
+ALTER TABLE `keyWorkerReports`
   ADD COLUMN `reviewNotesCiphertext` text,
   ADD COLUMN `approvedBy` int,
   ADD COLUMN `approvedAt` bigint,

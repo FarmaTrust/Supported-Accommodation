@@ -1,6 +1,7 @@
 import {
   bigint,
   decimal,
+  foreignKey,
   index,
   int,
   json,
@@ -1175,13 +1176,19 @@ export const colleagueInvitationPropertyGrants = mysqlTable(
   "colleagueInvitationPropertyGrants",
   {
     id: int("id").autoincrement().primaryKey(),
-    invitationId: int("invitationId").notNull().references(() => colleagueInvitations.id),
+    invitationId: int("invitationId").notNull(),
     propertyId: int("propertyId").notNull().references(() => properties.id),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
   },
   table => [
     uniqueIndex("colleague_invitation_property_uq").on(table.invitationId, table.propertyId),
     index("colleague_invitation_property_idx").on(table.propertyId),
+    // Explicit short name: the drizzle-generated one exceeds MySQL's 64-char identifier limit.
+    foreignKey({
+      columns: [table.invitationId],
+      foreignColumns: [colleagueInvitations.id],
+      name: "colleague_invitation_grant_invitation_fk",
+    }),
   ],
 );
 
@@ -1578,7 +1585,7 @@ export const dataRightsCases = mysqlTable("dataRightsCases", {
 ]);
 
 export const dataRightsEvents = mysqlTable("dataRightsEvents", {
-	id: bigint({ mode: "number" }).autoincrement().notNull(),
+	id: bigint({ mode: "number" }).autoincrement().primaryKey(),
 	entityId: int().notNull().references(() => entities.id),
 	caseId: int().notNull().references(() => dataRightsCases.id),
 	eventType: varchar({ length: 100 }).notNull(),
@@ -1835,7 +1842,7 @@ export const incidentWitnesses = mysqlTable("incidentWitnesses", {
 ]);
 
 export const integrationAttempts = mysqlTable("integrationAttempts", {
-	id: bigint({ mode: "number" }).autoincrement().notNull(),
+	id: bigint({ mode: "number" }).autoincrement().primaryKey(),
 	entityId: int().notNull().references(() => entities.id),
 	deliveryId: int().notNull().references(() => integrationDeliveries.id),
 	attemptNumber: int().notNull(),
@@ -1921,7 +1928,7 @@ export const integrationDeliveries = mysqlTable("integrationDeliveries", {
 ]);
 
 export const integrationReceipts = mysqlTable("integrationReceipts", {
-	id: bigint({ mode: "number" }).autoincrement().notNull(),
+	id: bigint({ mode: "number" }).autoincrement().primaryKey(),
 	entityId: int().notNull().references(() => entities.id),
 	connectionId: int().notNull().references(() => integrationConnections.id),
 	externalEventId: varchar({ length: 220 }).notNull(),
@@ -2097,7 +2104,7 @@ export const placementNotifications = mysqlTable("placementNotifications", {
 	submittedBy: int().references(() => users.id),
 	submissionMethod: mysqlEnum(['email','portal','secure_link','post','other']),
 	submissionReference: varchar({ length: 180 }),
-	submissionEvidenceDocumentId: int().references(() => documents.id),
+	submissionEvidenceDocumentId: int(),
 	decisionBy: int().references(() => users.id),
 	decisionAt: bigint({ mode: "number" }),
 	createdBy: int().references(() => users.id),
@@ -2106,12 +2113,14 @@ export const placementNotifications = mysqlTable("placementNotifications", {
 	dischargeDestinationType: mysqlEnum(['family','independent_living','supported_accommodation','semi_independent','custody','hospital','homeless','unknown','other']),
 	dischargeReason: mysqlEnum(['planned_transition','placement_end','safeguarding','placement_breakdown','custody','hospital','young_person_choice','other']),
 	dischargeDetailsCiphertext: text(),
-	receivingAuthorityId: int().references(() => localAuthorities.id),
+	receivingAuthorityId: int(),
 	handoverStatus: mysqlEnum(['not_started','planned','complete','not_applicable']),
 	followUpRequired: int().default(0).notNull(),
 	followUpDueAt: bigint({ mode: "number" }),
 },
 (table) => [
+    foreignKey({ columns: [table.submissionEvidenceDocumentId], foreignColumns: [documents.id], name: "fk_placementNotifications_submissionEvidenceDo_fd1b8b" }),
+    foreignKey({ columns: [table.receivingAuthorityId], foreignColumns: [localAuthorities.id], name: "fk_placementNotifications_receivingAuthorityId_c6f136" }),
 	uniqueIndex("placement_notification_type_uq").on(table.placementId, table.notificationType),
 	index("placement_notification_due_idx").on(table.entityId, table.status, table.dueAt),
 ]);
@@ -2448,7 +2457,7 @@ export const sharingDecisions = mysqlTable("sharingDecisions", {
 export const shiftChangeAcknowledgements = mysqlTable("shiftChangeAcknowledgements", {
 	id: int("id").autoincrement().primaryKey(),
 	entityId: int().notNull().references(() => entities.id),
-	shiftChangeEventId: int().notNull().references(() => shiftChangeEvents.id),
+	shiftChangeEventId: int().notNull(),
 	userId: int().notNull().references(() => users.id),
 	status: mysqlEnum(['unread','read','acknowledged','escalated']).default('unread').notNull(),
 	readAt: bigint({ mode: "number" }),
@@ -2457,6 +2466,7 @@ export const shiftChangeAcknowledgements = mysqlTable("shiftChangeAcknowledgemen
 	createdAt: timestamp().defaultNow().notNull(),
 },
 (table) => [
+    foreignKey({ columns: [table.shiftChangeEventId], foreignColumns: [shiftChangeEvents.id], name: "fk_shiftChangeAcknowledgeme_shiftChangeEventId_b24305" }),
 	uniqueIndex("shift_change_ack_uq").on(table.shiftChangeEventId, table.userId),
 	index("shift_ack_user_idx").on(table.userId, table.status),
 ]);
@@ -2754,7 +2764,7 @@ export const residentFinanceTransactions = mysqlTable("residentFinanceTransactio
 	id: int("id").autoincrement().primaryKey(),
 	entityId: int("entityId").notNull().references(() => entities.id),
 	placementId: int("placementId").notNull().references(() => placements.id),
-	accountId: int("accountId").notNull().references(() => residentFinanceAccounts.id),
+	accountId: int("accountId").notNull(),
 	transactionType: mysqlEnum("transactionType", ["deposit", "withdrawal", "purchase", "refund", "adjustment", "reversal"]).notNull(),
 	amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
 	balanceAfter: decimal("balanceAfter", { precision: 12, scale: 2 }).notNull(),
@@ -2772,6 +2782,7 @@ export const residentFinanceTransactions = mysqlTable("residentFinanceTransactio
 	createdBy: int("createdBy").notNull().references(() => users.id),
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => [
+    foreignKey({ columns: [table.accountId], foreignColumns: [residentFinanceAccounts.id], name: "fk_residentFinanceTransacti_accountId_b1ab25" }),
 	index("resident_finance_transaction_idx").on(table.accountId, table.occurredAt, table.status),
 ]);
 
@@ -2847,7 +2858,7 @@ export const medicationStockTransactions = mysqlTable("medicationStockTransactio
 	entityId: int("entityId").notNull().references(() => entities.id),
 	placementId: int("placementId").notNull().references(() => placements.id),
 	medicationId: int("medicationId").notNull().references(() => medications.id),
-	administrationId: int("administrationId").references(() => medicationAdministrations.id),
+	administrationId: int("administrationId"),
 	transactionType: mysqlEnum("transactionType", ["receipt", "administration", "return", "disposal", "correction", "count"]).notNull(),
 	quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
 	balanceAfter: decimal("balanceAfter", { precision: 10, scale: 3 }).notNull(),
@@ -2864,6 +2875,7 @@ export const medicationStockTransactions = mysqlTable("medicationStockTransactio
 	createdBy: int("createdBy").notNull().references(() => users.id),
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => [
+    foreignKey({ columns: [table.administrationId], foreignColumns: [medicationAdministrations.id], name: "fk_medicationStockTransacti_administrationId_1c0c44" }),
 	index("medication_stock_idx").on(table.medicationId, table.occurredAt, table.status),
 ]);
 
@@ -2983,16 +2995,24 @@ export const investigationActions = mysqlTable("investigationActions", {
 }, table => [index("investigation_action_idx").on(table.investigationId, table.status, table.dueAt)]);
 
 export const medicationDiscrepancies = mysqlTable("medicationDiscrepancies", {
-	id: int("id").autoincrement().primaryKey(), entityId: int("entityId").notNull().references(() => entities.id), placementId: int("placementId").notNull().references(() => placements.id), medicationId: int("medicationId").notNull().references(() => medications.id), administrationId: int("administrationId").references(() => medicationAdministrations.id), stockTransactionId: int("stockTransactionId").references(() => medicationStockTransactions.id), discrepancyType: mysqlEnum("discrepancyType", ["missing_stock", "excess_stock", "wrong_dose", "wrong_time", "wrong_person", "recording_error", "storage", "expiry", "other"]).notNull(), expectedQuantity: decimal("expectedQuantity", { precision: 10, scale: 3 }), actualQuantity: decimal("actualQuantity", { precision: 10, scale: 3 }), detailsCiphertext: text("detailsCiphertext").notNull(), immediateActionsCiphertext: text("immediateActionsCiphertext").notNull(), status: mysqlEnum("status", ["open", "under_review", "action_required", "resolved", "closed"]).default("open").notNull(), reviewedBy: int("reviewedBy").references(() => users.id), reviewedAt: bigint("reviewedAt", { mode: "number" }), resolutionCiphertext: text("resolutionCiphertext"), createdBy: int("createdBy").notNull().references(() => users.id), createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, table => [index("medication_discrepancy_idx").on(table.entityId, table.status, table.createdAt)]);
+	id: int("id").autoincrement().primaryKey(), entityId: int("entityId").notNull().references(() => entities.id), placementId: int("placementId").notNull().references(() => placements.id), medicationId: int("medicationId").notNull().references(() => medications.id), administrationId: int("administrationId"), stockTransactionId: int("stockTransactionId"), discrepancyType: mysqlEnum("discrepancyType", ["missing_stock", "excess_stock", "wrong_dose", "wrong_time", "wrong_person", "recording_error", "storage", "expiry", "other"]).notNull(), expectedQuantity: decimal("expectedQuantity", { precision: 10, scale: 3 }), actualQuantity: decimal("actualQuantity", { precision: 10, scale: 3 }), detailsCiphertext: text("detailsCiphertext").notNull(), immediateActionsCiphertext: text("immediateActionsCiphertext").notNull(), status: mysqlEnum("status", ["open", "under_review", "action_required", "resolved", "closed"]).default("open").notNull(), reviewedBy: int("reviewedBy").references(() => users.id), reviewedAt: bigint("reviewedAt", { mode: "number" }), resolutionCiphertext: text("resolutionCiphertext"), createdBy: int("createdBy").notNull().references(() => users.id), createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [
+    foreignKey({ columns: [table.administrationId], foreignColumns: [medicationAdministrations.id], name: "fk_medicationDiscrepancies_administrationId_97aab9" }),
+    foreignKey({ columns: [table.stockTransactionId], foreignColumns: [medicationStockTransactions.id], name: "fk_medicationDiscrepancies_stockTransactionId_897f8f" }),index("medication_discrepancy_idx").on(table.entityId, table.status, table.createdAt)]);
 
 export const residentFinanceReconciliations = mysqlTable("residentFinanceReconciliations", {
-	id: int("id").autoincrement().primaryKey(), entityId: int("entityId").notNull().references(() => entities.id), placementId: int("placementId").notNull().references(() => placements.id), accountId: int("accountId").notNull().references(() => residentFinanceAccounts.id), workPlanActionId: int("workPlanActionId").references(() => workPlanActions.id), periodStart: bigint("periodStart", { mode: "number" }).notNull(), periodEnd: bigint("periodEnd", { mode: "number" }).notNull(), openingBalance: decimal("openingBalance", { precision: 12, scale: 2 }).notNull(), expectedClosingBalance: decimal("expectedClosingBalance", { precision: 12, scale: 2 }).notNull(), actualClosingBalance: decimal("actualClosingBalance", { precision: 12, scale: 2 }).notNull(), difference: decimal("difference", { precision: 12, scale: 2 }).notNull(), notesCiphertext: text("notesCiphertext"), status: mysqlEnum("status", ["draft", "submitted", "balanced", "discrepancy", "approved", "returned"]).default("draft").notNull(), reviewedBy: int("reviewedBy").references(() => users.id), reviewedAt: bigint("reviewedAt", { mode: "number" }), createdBy: int("createdBy").notNull().references(() => users.id), createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, table => [uniqueIndex("resident_reconciliation_period_uq").on(table.accountId, table.periodStart, table.periodEnd), index("resident_reconciliation_idx").on(table.entityId, table.status, table.periodEnd)]);
+	id: int("id").autoincrement().primaryKey(), entityId: int("entityId").notNull().references(() => entities.id), placementId: int("placementId").notNull().references(() => placements.id), accountId: int("accountId").notNull(), workPlanActionId: int("workPlanActionId"), periodStart: bigint("periodStart", { mode: "number" }).notNull(), periodEnd: bigint("periodEnd", { mode: "number" }).notNull(), openingBalance: decimal("openingBalance", { precision: 12, scale: 2 }).notNull(), expectedClosingBalance: decimal("expectedClosingBalance", { precision: 12, scale: 2 }).notNull(), actualClosingBalance: decimal("actualClosingBalance", { precision: 12, scale: 2 }).notNull(), difference: decimal("difference", { precision: 12, scale: 2 }).notNull(), notesCiphertext: text("notesCiphertext"), status: mysqlEnum("status", ["draft", "submitted", "balanced", "discrepancy", "approved", "returned"]).default("draft").notNull(), reviewedBy: int("reviewedBy").references(() => users.id), reviewedAt: bigint("reviewedAt", { mode: "number" }), createdBy: int("createdBy").notNull().references(() => users.id), createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [
+    foreignKey({ columns: [table.accountId], foreignColumns: [residentFinanceAccounts.id], name: "fk_residentFinanceReconcili_accountId_0fa85f" }),
+    foreignKey({ columns: [table.workPlanActionId], foreignColumns: [workPlanActions.id], name: "fk_residentFinanceReconcili_workPlanActionId_8dbfa6" }),uniqueIndex("resident_reconciliation_period_uq").on(table.accountId, table.periodStart, table.periodEnd), index("resident_reconciliation_idx").on(table.entityId, table.status, table.periodEnd)]);
 
 export const residentFinanceDiscrepancies = mysqlTable("residentFinanceDiscrepancies", {
-	id: int("id").autoincrement().primaryKey(), entityId: int("entityId").notNull().references(() => entities.id), placementId: int("placementId").notNull().references(() => placements.id), accountId: int("accountId").notNull().references(() => residentFinanceAccounts.id), transactionId: int("transactionId").references(() => residentFinanceTransactions.id), reconciliationId: int("reconciliationId").references(() => residentFinanceReconciliations.id), workPlanActionId: int("workPlanActionId").references(() => workPlanActions.id), discrepancyType: mysqlEnum("discrepancyType", ["cash_short", "cash_over", "missing_receipt", "duplicate", "unauthorised", "calculation", "other"]).notNull(), amount: decimal("amount", { precision: 12, scale: 2 }), detailsCiphertext: text("detailsCiphertext").notNull(), immediateActionsCiphertext: text("immediateActionsCiphertext"), status: mysqlEnum("status", ["open", "under_review", "action_required", "resolved", "closed"]).default("open").notNull(), reviewedBy: int("reviewedBy").references(() => users.id), reviewedAt: bigint("reviewedAt", { mode: "number" }), resolutionCiphertext: text("resolutionCiphertext"), createdBy: int("createdBy").notNull().references(() => users.id), createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-}, table => [index("resident_finance_discrepancy_idx").on(table.entityId, table.status, table.createdAt)]);
+	id: int("id").autoincrement().primaryKey(), entityId: int("entityId").notNull().references(() => entities.id), placementId: int("placementId").notNull().references(() => placements.id), accountId: int("accountId").notNull(), transactionId: int("transactionId"), reconciliationId: int("reconciliationId"), workPlanActionId: int("workPlanActionId"), discrepancyType: mysqlEnum("discrepancyType", ["cash_short", "cash_over", "missing_receipt", "duplicate", "unauthorised", "calculation", "other"]).notNull(), amount: decimal("amount", { precision: 12, scale: 2 }), detailsCiphertext: text("detailsCiphertext").notNull(), immediateActionsCiphertext: text("immediateActionsCiphertext"), status: mysqlEnum("status", ["open", "under_review", "action_required", "resolved", "closed"]).default("open").notNull(), reviewedBy: int("reviewedBy").references(() => users.id), reviewedAt: bigint("reviewedAt", { mode: "number" }), resolutionCiphertext: text("resolutionCiphertext"), createdBy: int("createdBy").notNull().references(() => users.id), createdAt: timestamp("createdAt").defaultNow().notNull(), updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [
+    foreignKey({ columns: [table.accountId], foreignColumns: [residentFinanceAccounts.id], name: "fk_residentFinanceDiscrepan_accountId_21b03f" }),
+    foreignKey({ columns: [table.transactionId], foreignColumns: [residentFinanceTransactions.id], name: "fk_residentFinanceDiscrepan_transactionId_9a1d45" }),
+    foreignKey({ columns: [table.reconciliationId], foreignColumns: [residentFinanceReconciliations.id], name: "fk_residentFinanceDiscrepan_reconciliationId_a9ec8d" }),
+    foreignKey({ columns: [table.workPlanActionId], foreignColumns: [workPlanActions.id], name: "fk_residentFinanceDiscrepan_workPlanActionId_b31174" }),index("resident_finance_discrepancy_idx").on(table.entityId, table.status, table.createdAt)]);
 
 export const keyWorkerReportSources = mysqlTable("keyWorkerReportSources", {
 	id: int("id").autoincrement().primaryKey(),
@@ -3012,10 +3032,10 @@ export const medicationSelfAdministrationEvents = mysqlTable("medicationSelfAdmi
 	id: int("id").autoincrement().primaryKey(),
 	entityId: int("entityId").notNull().references(() => entities.id),
 	placementId: int("placementId").notNull().references(() => placements.id),
-	medicationId: int("medicationId").notNull().references(() => medications.id),
-	administrationId: int("administrationId").references(() => medicationAdministrations.id),
-	stockTransactionId: int("stockTransactionId").references(() => medicationStockTransactions.id),
-	discrepancyId: int("discrepancyId").references(() => medicationDiscrepancies.id),
+	medicationId: int("medicationId").notNull(),
+	administrationId: int("administrationId"),
+	stockTransactionId: int("stockTransactionId"),
+	discrepancyId: int("discrepancyId"),
 	eventType: mysqlEnum("eventType", ["assessment", "authorised", "supported", "self_administered", "observed", "withheld", "reviewed", "revoked"]).notNull(),
 	outcome: mysqlEnum("outcome", ["safe", "support_required", "not_safe", "completed", "refused", "omitted", "not_applicable"]).notNull(),
 	occurredAt: bigint("occurredAt", { mode: "number" }).notNull(),
@@ -3026,6 +3046,10 @@ export const medicationSelfAdministrationEvents = mysqlTable("medicationSelfAdmi
 	createdBy: int("createdBy").notNull().references(() => users.id),
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
 }, table => [
+    foreignKey({ columns: [table.medicationId], foreignColumns: [medications.id], name: "fk_medicationSelfAdministra_medicationId_061f4d" }),
+    foreignKey({ columns: [table.administrationId], foreignColumns: [medicationAdministrations.id], name: "fk_medicationSelfAdministra_administrationId_2863c8" }),
+    foreignKey({ columns: [table.stockTransactionId], foreignColumns: [medicationStockTransactions.id], name: "fk_medicationSelfAdministra_stockTransactionId_9322aa" }),
+    foreignKey({ columns: [table.discrepancyId], foreignColumns: [medicationDiscrepancies.id], name: "fk_medicationSelfAdministra_discrepancyId_abb526" }),
 	index("med_self_admin_idx").on(table.medicationId, table.occurredAt, table.eventType),
 ]);
 
@@ -3036,7 +3060,7 @@ export const notificationChannelDeliveries = mysqlTable("notificationChannelDeli
 	userId: int("userId").notNull().references(() => users.id),
 	channel: mysqlEnum("channel", ["push", "email", "sms"]).notNull(),
 	status: mysqlEnum("status", ["pending", "provider_inactive", "queued", "processing", "delivered", "failed", "cancelled"]).default("pending").notNull(),
-	providerConnectionId: int("providerConnectionId").references(() => integrationConnections.id),
+	providerConnectionId: int("providerConnectionId"),
 	idempotencyKey: varchar("idempotencyKey", { length: 220 }).notNull(),
 	recipientHint: varchar("recipientHint", { length: 160 }),
 	payloadSnapshot: json("payloadSnapshot").$type<{ title: string; body: string; deepLink?: string; containsSensitiveDetails: false }>().notNull(),
@@ -3048,6 +3072,7 @@ export const notificationChannelDeliveries = mysqlTable("notificationChannelDeli
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
 	updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [
+    foreignKey({ columns: [table.providerConnectionId], foreignColumns: [integrationConnections.id], name: "fk_notificationChannelDeliv_providerConnectionId_6a2c68" }),
 	uniqueIndex("notification_channel_delivery_uq").on(table.idempotencyKey),
 	index("notification_channel_queue_idx").on(table.entityId, table.channel, table.status, table.nextAttemptAt),
 ]);

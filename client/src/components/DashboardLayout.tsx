@@ -170,7 +170,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const { entities, entityId, entity, setEntityId, loading } = useWorkspace();
   const isCollapsed = state === "collapsed";
   const isMobile = useIsMobile();
-  if (!loading && entities.length === 0 && user?.operationalRole !== "owner") return <NoWorkspaceAccess onSignOut={logout} />;
   const userNotifications = trpc.workspace.notifications.useQuery(undefined, { staleTime: 30_000, refetchInterval: 30_000 });
   const unreadNotificationCount = userNotifications.data?.filter(item => !item.readAt).length ?? 0;
   const notificationSound = useNotificationSound(userNotifications.data);
@@ -192,6 +191,9 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     ? [...operationalMenuItems, { icon: ShieldAlert, label: "Superadmin", path: "/superadmin" }]
     : operationalMenuItems;
   const active = scopedMenuItems.find(item => matchesLocation(item.path));
+
+  // ponytail: guard must sit after every hook, otherwise the empty-workspace render bails early and React throws "Rendered fewer hooks than expected".
+  if (!loading && entities.length === 0 && user?.operationalRole !== "owner") return <NoWorkspaceAccess onSignOut={logout} />;
 
   return (
     <>
