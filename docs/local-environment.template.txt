@@ -3,7 +3,7 @@
 # Never commit .env.local or use production credentials locally.
 
 # Server-only secrets
-DATABASE_URL=mysql://USER:PASSWORD@HOST:3306/DATABASE
+TIDB_DATABASE_URL=mysql://USER:PASSWORD@HOST:4000/DATABASE?ssl=%7B%22rejectUnauthorized%22%3Atrue%7D
 JWT_SECRET=replace-with-a-strong-random-development-only-secret
 # Required once to establish the first local owner account; rotate or remove after use.
 LOCAL_AUTH_BOOTSTRAP_TOKEN=replace-with-a-strong-random-one-time-bootstrap-token

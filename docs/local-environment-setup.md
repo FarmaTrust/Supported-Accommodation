@@ -12,7 +12,7 @@ cp docs/local-environment.template.txt .env.local
 
 | Variable group | Used by | Handling requirement |
 |---|---|---|
-| `DATABASE_URL`, `JWT_SECRET`, `LOCAL_AUTH_BOOTSTRAP_TOKEN`, `BUILT_IN_FORGE_API_KEY` | Server only | Treat as secrets; never prefix them with `VITE_`, commit them, or paste them into tickets/chat. |
+| `TIDB_DATABASE_URL`, `JWT_SECRET`, `LOCAL_AUTH_BOOTSTRAP_TOKEN`, `BUILT_IN_FORGE_API_KEY` | Server only | Treat as secrets; never prefix them with `VITE_`, commit them, or paste them into tickets/chat. |
 | `LOCAL_AUTH_BOOTSTRAP_TOKEN` | Server only | A one-time, high-entropy setup token used only to establish the first local owner email/password account. Rotate or remove it after that account is confirmed. |
 | `BUILT_IN_FORGE_API_URL` | Server only | Development endpoint for enabled managed platform services such as object storage. |
 | `VITE_APP_TITLE`, `VITE_APP_LOGO` | Browser presentation | Optional application branding values. |

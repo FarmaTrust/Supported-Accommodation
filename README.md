@@ -41,7 +41,7 @@ Replace only the placeholder values with **development-only** configuration. The
 
 | Variable | Visibility | Purpose |
 |---|---|---|
-| `DATABASE_URL` | Server-only | Development MySQL/TiDB connection string. |
+| `TIDB_DATABASE_URL` | Server-only | Development MySQL/TiDB connection string. |
 | `JWT_SECRET` | Server-only | Strong, random development session-signing secret. |
 | `LOCAL_AUTH_BOOTSTRAP_TOKEN` | Server-only | One-time high-entropy token used only to establish the first local owner account. Rotate or remove it after use. |
 | `BUILT_IN_FORGE_API_URL`, `BUILT_IN_FORGE_API_KEY` | Server-only | Development integration endpoint and credential where storage/platform services are used. |

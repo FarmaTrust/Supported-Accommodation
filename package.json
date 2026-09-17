@@ -9,12 +9,6 @@
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "format": "prettier --write .",
-    "test": "vitest run",
-    "testdata:load": "node scripts/load-fictional-test-data.mjs",
-    "testdata:verify": "node scripts/verify-fictional-test-data.mjs",
-    "testdata:compliance": "node scripts/load-test-compliance-evidence.mjs",
-    "testdata:compliance:evaluate": "tsx scripts/evaluate-test-compliance-renewals.ts",
-    "testdata:compliance:verify": "node scripts/verify-test-compliance-evidence.mjs",
     "db:push": "drizzle-kit generate && drizzle-kit migrate"
   },
   "dependencies": {
