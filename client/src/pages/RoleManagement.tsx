@@ -153,12 +153,18 @@ function RoleDialog({ entityId, draft, data, labelFor, onClose, onDone }: {
   });
   const pending = create.isPending || update.isPending || archive.isPending;
 
+  const missing = [
+    form.name.trim().length < 2 && "a name",
+    !form.paths.length && "at least one page",
+  ].filter(Boolean) as string[];
+
   const toggle = (key: "granted" | "denied" | "paths", value: string) => setForm(current => ({
     ...current,
     [key]: current[key].includes(value) ? current[key].filter(item => item !== value) : [...current[key], value],
   }));
 
   const submit = () => {
+    if (missing.length) { toast.error(`Add ${missing.join(" and ")} before saving.`); return; }
     const payload = {
       entityId,
       name: form.name.trim(),
@@ -167,7 +173,7 @@ function RoleDialog({ entityId, draft, data, labelFor, onClose, onDone }: {
       grantedCapabilities: form.granted,
       deniedCapabilities: form.denied,
       visiblePaths: form.paths.filter(path => availablePaths.includes(path)),
-      reason: form.reason.trim(),
+      reason: form.reason.trim() || undefined,
     };
     if (form.id) update.mutate({ ...payload, id: form.id });
     else create.mutate(payload);
@@ -252,19 +258,19 @@ function RoleDialog({ entityId, draft, data, labelFor, onClose, onDone }: {
           </fieldset>
 
           <div className="space-y-2">
-            <Label htmlFor="role-reason">Reason for the audit trail</Label>
-            <Textarea id="role-reason" value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} placeholder="At least 20 characters." />
+            <Label htmlFor="role-reason">Reason for the audit trail (optional)</Label>
+            <Textarea id="role-reason" value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} placeholder="Optional — recorded in the audit trail." />
           </div>
         </div>
 
         <DialogFooter className="sm:justify-between">
           {existing && !existing.isBuiltIn && existing.status === "active"
-            ? <Button variant="ghost" className="text-destructive" disabled={pending || form.reason.trim().length < 20}
-                onClick={() => archive.mutate({ entityId, id: existing.id, reason: form.reason.trim() })}>Archive</Button>
+            ? <Button variant="ghost" className="text-destructive" disabled={pending}
+                onClick={() => archive.mutate({ entityId, id: existing.id, reason: form.reason.trim() || undefined })}>Archive</Button>
             : <span />}
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose} disabled={pending}>Cancel</Button>
-            <Button onClick={submit} disabled={pending || form.name.trim().length < 2 || form.reason.trim().length < 20 || !form.paths.length}>
+            <Button onClick={submit} disabled={pending}>
               {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save
             </Button>
           </div>
@@ -295,11 +301,21 @@ function PersonDialog({ entityId, userId, data, onClose, onDone }: {
   const pending = create.isPending || assign.isPending;
   const role = assignable.find(item => item.id === form.roleId);
 
+  // The button stays clickable; anything missing is reported when it is pressed.
+  const missing = [
+    !form.roleId && "a role",
+    !member && form.name.trim().length < 2 && "a full name",
+    !member && !form.email.includes("@") && "an email address",
+    !member && form.temporaryPassword.length < 6 && "a temporary password of at least 6 characters",
+    !form.allProperties && !form.propertyIds.length && "at least one property",
+  ].filter(Boolean) as string[];
+
   const submit = () => {
+    if (missing.length) { toast.error(`Add ${missing.join(", ")} before saving.`); return; }
     const shared = {
       entityId, roleId: form.roleId, role: (role?.baseRole ?? "read_only") as never,
       allProperties: form.allProperties, propertyIds: form.propertyIds,
-      extraCapabilities: [] as never, reason: form.reason.trim(),
+      extraCapabilities: [] as never, reason: form.reason.trim() || undefined,
     };
     if (member) assign.mutate({ ...shared, targetUserId: member.userId });
     else create.mutate({ ...shared, email: form.email.trim(), name: form.name.trim(), temporaryPassword: form.temporaryPassword });
@@ -323,7 +339,7 @@ function PersonDialog({ entityId, userId, data, onClose, onDone }: {
               <div className="space-y-2">
                 <Label htmlFor="person-password">Temporary password</Label>
                 <Input id="person-password" autoComplete="new-password" value={form.temporaryPassword} onChange={event => setForm({ ...form, temporaryPassword: event.target.value })} />
-                <p className="text-xs text-muted-foreground">At least 14 characters, using three of: lowercase, uppercase, number, symbol.</p>
+                <p className="text-xs text-muted-foreground">At least 6 characters, using three of: lowercase, uppercase, number, symbol.</p>
               </div>
             </>
           )}
@@ -368,14 +384,14 @@ function PersonDialog({ entityId, userId, data, onClose, onDone }: {
           </fieldset>
 
           <div className="space-y-2">
-            <Label htmlFor="person-reason">Reason for the audit trail</Label>
-            <Textarea id="person-reason" value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} placeholder="At least 20 characters." />
+            <Label htmlFor="person-reason">Reason for the audit trail (optional)</Label>
+            <Textarea id="person-reason" value={form.reason} onChange={event => setForm({ ...form, reason: event.target.value })} placeholder="Optional — recorded in the audit trail." />
           </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={pending}>Cancel</Button>
-          <Button disabled={pending || !form.roleId || form.reason.trim().length < 20 || (!member && (form.name.trim().length < 2 || !form.email.includes("@")))} onClick={submit}>
+          <Button disabled={pending} onClick={submit}>
             {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{member ? "Save" : "Create user"}
           </Button>
         </DialogFooter>

@@ -22,8 +22,12 @@ import {
   canRemoveOwner,
   normaliseManagedCapabilities,
   propertyAssignmentTypeForRole,
-  requireMeaningfulAccessReason,
 } from "../services/rbacRules";
+
+/** The audit trail always carries a reason field, even when the operator left it blank. */
+function optionalReason(reason: string | undefined) {
+  return reason?.trim() || "Not given";
+}
 import { visibleWorkspacePaths } from "../../client/src/lib/roleNavigation";
 import { requireDb } from "./shared";
 import { builtInRoleId } from "../services/roleResolution";
@@ -56,7 +60,8 @@ const WORKSPACE_PAGES = [
 ] as const;
 
 const baseRoleSchema = z.enum(MANAGEABLE_ROLES);
-const reasonSchema = z.string().trim().min(20).max(1200);
+// Optional: an empty reason is recorded as "not given" rather than blocking the change.
+const reasonSchema = z.string().trim().max(1200).optional();
 const roleDefinitionInput = {
   name: z.string().trim().min(2).max(120),
   description: z.string().trim().max(600).optional(),
@@ -162,7 +167,7 @@ export const roleManagementRouter = router({
     await assertEntityCapability(ctx.user.id, input.entityId, "config.write");
     const db = await requireDb();
     const definition = validateCustomRole(input);
-    const reason = requireMeaningfulAccessReason(input.reason);
+    const reason = optionalReason(input.reason);
 
     const [clash] = await db.select({ id: rolesTable.id }).from(rolesTable)
       .where(and(eq(rolesTable.entityId, input.entityId), eq(rolesTable.slug, definition.slug))).limit(1);
@@ -197,7 +202,7 @@ export const roleManagementRouter = router({
   })).mutation(async ({ ctx, input }) => {
     await assertEntityCapability(ctx.user.id, input.entityId, "config.write");
     const db = await requireDb();
-    const reason = requireMeaningfulAccessReason(input.reason);
+    const reason = optionalReason(input.reason);
 
     const [existing] = await db.select().from(rolesTable)
       .where(and(eq(rolesTable.id, input.id), or(isNull(rolesTable.entityId), eq(rolesTable.entityId, input.entityId)))).limit(1);
@@ -254,7 +259,7 @@ export const roleManagementRouter = router({
   })).mutation(async ({ ctx, input }) => {
     await assertEntityCapability(ctx.user.id, input.entityId, "config.write");
     const db = await requireDb();
-    const reason = requireMeaningfulAccessReason(input.reason);
+    const reason = optionalReason(input.reason);
     const [existing] = await db.select().from(rolesTable)
       .where(and(eq(rolesTable.id, input.id), or(isNull(rolesTable.entityId), eq(rolesTable.entityId, input.entityId)))).limit(1);
     if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: "That role was not found." });
@@ -293,7 +298,7 @@ export const roleManagementRouter = router({
   })).mutation(async ({ ctx, input }) => {
     await assertEntityCapability(ctx.user.id, input.entityId, "config.write");
     const db = await requireDb();
-    const reason = requireMeaningfulAccessReason(input.reason);
+    const reason = optionalReason(input.reason);
     const email = normaliseLocalEmail(input.email);
 
     // Validate the password and the access plan before writing anything, so a rejected
@@ -343,7 +348,7 @@ export const roleManagementRouter = router({
   })).mutation(async ({ ctx, input }) => {
     await assertEntityCapability(ctx.user.id, input.entityId, "config.write");
     const db = await requireDb();
-    const reason = requireMeaningfulAccessReason(input.reason);
+    const reason = optionalReason(input.reason);
 
     const [membership] = await db.select().from(entityMemberships)
       .where(and(eq(entityMemberships.entityId, input.entityId), eq(entityMemberships.userId, input.targetUserId))).limit(1);

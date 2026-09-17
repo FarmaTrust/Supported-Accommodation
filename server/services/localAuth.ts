@@ -21,7 +21,7 @@ export function normaliseLocalEmail(email: string) {
 }
 
 export function validateLocalPassword(password: string) {
-  if (password.length < 14) return "Use at least 14 characters.";
+  if (password.length < 6) return "Use at least 6 characters.";
   if (password.length > 256) return "Use no more than 256 characters.";
   if (/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(password)) return "Remove control characters from the password.";
   const classes = [/[a-z]/.test(password), /[A-Z]/.test(password), /\d/.test(password), /[^A-Za-z0-9]/.test(password)].filter(Boolean).length;
