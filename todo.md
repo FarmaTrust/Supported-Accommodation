@@ -349,3 +349,72 @@
 - [x] Repair the TEST-only reset-link parameter mismatch and retain legacy reset-link compatibility
 - [x] Add regression tests for stable test credentials, reset-link routing and normal secure sign-in, then issue and verify one controlled test credential baseline
 - [x] Run full authentication validation, mobile/desktop recovery checks and checkpoint the permanent test-access repair
+- [x] Make the Keyworker App the server-verified post-sign-in destination for support workers, with current-shift clocking prompts and in-app shift-time reminders
+- [x] Enforce active-shift property and placement filtering for Keyworker Properties, Care and Health, and Staff Workspace data; retain empty/denied states when no active shift applies
+- [x] Remove Rota & Shifts, compliance, documents and packs navigation from Keyworker accounts while preserving server-side safeguards for direct URLs
+- [x] Render handover provenance with property, author and created UTC-local time; retain acknowledgement and assignment checks
+- [x] Extend visitor checkout to require/display departure time and optional departure note, with restricted audit evidence
+- [x] Add targeted authorization, navigation and workflow tests; run full validation, desktop/mobile verification and checkpoint the Keyworker scope release
+- [x] Hide the Keyworker-only “My status by property” roll-up while retaining current report prompts and manager oversight
+- [x] Move Staff workspace below Care & health in Keyworker navigation and preserve server-authoritative current-shift/property/placement restrictions
+- [x] Add controlled multi-file document/photo capture for Keyworker personal certificate and sickness requests, storing bytes only in object storage with metadata, validation and access controls
+- [x] Reuse the controlled evidence attachment pattern on existing document/certificate image input workflows where record access already permits uploads
+- [x] Rebuild Care & health navigation as compact horizontal action rows for health monitoring, medication, curfew, professional contacts and scheduled attendance; preserve larger editable, spell-checkable and dictated narrative review fields
+- [x] Re-verify property/author/time handover provenance and visitor arrival/departure time plus departure notes in the Keyworker workflow
+- [x] Add focused authorization, upload, UI-contract and responsive tests; run full validation and save the Keyworker care/evidence checkpoint
+- [x] Add manager-only staff evidence review, download, approve, reject and return flows using the existing staff-request lifecycle
+- [x] Add entity-scoped reusable health, medication and curfew template selection with recorded template provenance
+- [x] Add configurable evidence-review, document-expiry and retention reminders through the platform Heartbeat lifecycle, with manager-only configuration and deduplicated in-app notices
+- [x] Package and validate the reusable supported-accommodation evidence and care workflow skill
+- [x] Run schema, security, full regression and responsive verification before checkpointing the evidence-care release
+- [x] Deny property safety, tenure and renewal evidence to Keyworker sessions both server-side and in property detail views
+- [x] Add authorised occupant display to occupancy history without exposing unassigned resident identity
+- [x] Repair Care and Health Current Plan selection with clear empty-plan guidance and improve record activity controls
+- [x] Seed and verify coherent fictional Care and Health plans, events, contacts, attendance and medication records for TEST only
+- [x] Rename Manager App to RSM App and add a restricted Nominated Individual App for existing owner-level governance oversight
+- [x] Add authorization, interaction and TEST-data checks; run full validation, desktop/mobile review and checkpoint the release
+- [x] Reorder Care and Health sections as College/court/appointments, Curfew, Professional contacts, Medication, then Health monitoring across desktop and mobile
+- [x] Add server-authorised, placement-scoped care and report history for the selected young person, with explicit current-shift and active-assignment enforcement plus audit evidence
+- [x] Add a searchable, chronological history view that groups the selected young person’s care activity, medication, curfew, attendance and Keyworker reports without exposing unrelated placements
+- [x] Add a print-optimised current-young-person care record pack with property/reference context and printable history, retaining ordinary browser print controls
+- [x] Add focused scope/order/history/print tests, complete full validation and visual desktop/mobile checks, then checkpoint the Care history release
+
+- [x] Define a dedicated printable-record export request model with immutable staged-PDF hash, approval state, safe failure code and controlled document archive link
+- [x] Apply an additive schema migration for printable-record export requests and verify the live database schema
+- [x] Implement server-authorised selected-range young-person compilation requests with current-shift, property, placement, sensitivity and independent Manager/RSM/Owner approval controls
+- [x] Implement selected-range shift and controlled-document-register PDF exports with applicable role and property-scope controls
+- [x] Render multipage factual PDF snapshots, append approval/provenance blocks, store bytes in object storage and retain only controlled document metadata/hashes in MySQL
+- [x] Add audited request, review, release, denial, failure, preview and download events without protected narratives or tokens in audit metadata
+- [x] Add mobile-first request/download controls to Care, Rota and Documents and a Manager/RSM approval queue
+- [x] Add focused tests for range validation, approval independence, scoped access, renderer output and safe audit contracts
+- [x] Run migration, type checks, focused/full tests, build, restart and desktop/mobile verification; update operational guidance and save a release checkpoint
+
+- [x] Add a single server-authorised rota overview contract for the selected 06:00–06:00 operational day, retaining existing tenant/property and frontline own-shift restrictions
+- [x] Add a coverage-first Rota & shifts experience with global date, property and colleague filters, an explicit data-quality state, assignment/gap priorities and readable 24-hour bars
+- [x] Add colleague lanes plus factual working-together and close-overlap groups derived only from the authoritative shift set
+- [x] Restrict RSM/Owner scheduling, shift-change approval and calendar actions to operational managers; present HR/Compliance and read-only staff with relevant non-editable rota information
+- [x] Add a compact personal rota panel to the Keyworker App that shows only the logged-in worker’s current and upcoming assigned shifts and uses no broader rota route access
+- [x] Add a responsive manager-calendar mobile board with an accessible Move fallback while retaining server-validated desktop drag/drop scheduling
+- [x] Add focused view-model, role-aware UI and current-shift data-contract tests, then complete type, full-test, build, desktop/mobile and post-restart validation
+
+- [x] Replace open-shift counting with server-authoritative 06:00–06:00 interval coverage detection, including intervals with no shift row
+- [x] Add Owner/RSM-only 31-day coverage checks, persistent urgent gap notifications, safe deduplication and automatic resolution once the exact interval is covered
+- [x] Include coverage-gap checks in the existing managed daily operational evaluator without adding an in-process worker or timer
+- [x] Update Rota & shifts with clear interval-gap cards, missing-cover duration, deep links and a compact 31-day management check
+- [x] Expand the fictional TEST roster and generate 31 days of three-part 24-hour property cover with no duplicate or overlapping staff assignments
+- [x] Verify the idempotent TEST loader, interval coverage checks, skill validator, focused tests and manager browser workflow before the final regression
+
+- [x] Add compact Manager/RSM rota perspectives for Premises and Shift Workers, and a separate non-editable My shift view for Keyworkers
+- [x] Compress the operational timeline to a full readable 06:00–06:00 day on phone and desktop layouts
+- [x] Add reviewable, versioned and independently approved Quality of Support report PDFs with secure inspection printing
+- [x] Add restricted multi-file Quality Review evidence bundles with mobile camera capture, object storage, hashes and authorised existing-document linking
+- [x] Add optional first-login phone capture with server validation, restricted storage and metadata-only audit evidence
+- [x] Replace the overlapping TEST Keyworker fixture with a generated coverage-slot replacement and validate 31-day coverage, duplicate, worker-overlap and property-overlap invariants
+
+- [x] Optimise the Keyworker My shift screen for compact phone use while retaining the full 06:00–06:00 day.
+- [x] Add a server-authorised contact view for on-shift colleagues and named property supervisors.
+- [x] Add manager replacement selection directly from identified coverage gaps with availability, conflict, override, audit and alert-resolution controls.
+- [x] Preserve replacement and ordinary shift creation records for the existing governed printable shift/timesheet reports.
+- [x] Create restricted inspection-pack ZIPs containing a printable index, approved quality-review reports, reviewed evidence and permitted released printable reports.
+- [x] Restrict inspection-pack creation and download to Owner/RSM/Manager or Nominated Individual oversight with audit evidence.
+- [x] Validate mobile rota, replacement workflow, inspection archive and authorisation contracts.

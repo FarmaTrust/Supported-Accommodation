@@ -1,7 +1,10 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarInset, SidebarMenu, SidebarMenuButton,
@@ -26,7 +29,8 @@ const menuItems = [
   { icon: Building2, label: "Properties", path: "/properties" },
   { icon: UsersRound, label: "Workforce", path: "/workforce" },
   { icon: KeyRound, label: "Access control", path: "/access-control" },
-  { icon: LayoutDashboard, label: "Manager app", path: "/manager-app" },
+  { icon: LayoutDashboard, label: "RSM App", path: "/manager-app" },
+  { icon: ShieldCheck, label: "Nominated Individual App", path: "/nominated-individual" },
   { icon: UserRound, label: "Staff workspace", path: "/staff" },
   { icon: BookOpenText, label: "Young people", path: "/placements" },
   { icon: CalendarDays, label: "Rota & shifts", path: "/rota" },
@@ -46,10 +50,10 @@ const menuItems = [
 ];
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { loading, user, authIssue, passwordChangeRequired } = useAuth();
+  const { loading, user, authIssue, passwordChangeRequired, phoneCaptureRequired } = useAuth();
   if (loading || !user) return <SignInScreen loading={loading} feedback={authIssue} />;
   if (passwordChangeRequired) return <SignInScreen loading={false} feedback={null} forcePasswordChange />;
-  return <WorkspaceProvider><SidebarProvider><DashboardLayoutContent>{children}</DashboardLayoutContent></SidebarProvider></WorkspaceProvider>;
+  return <WorkspaceProvider><SidebarProvider><DashboardLayoutContent>{children}</DashboardLayoutContent><PhoneCaptureDialog required={phoneCaptureRequired} /></SidebarProvider></WorkspaceProvider>;
 }
 
 function SignInScreen({ loading, feedback, forcePasswordChange = false }: { loading: boolean; feedback: AuthFeedback | null; forcePasswordChange?: boolean }) {
@@ -163,6 +167,24 @@ function Brand({ collapsed = false }: { collapsed?: boolean }) {
   return <div className="flex items-center gap-3"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-foreground text-background"><House className="h-4 w-4" /></div>{!collapsed && <div className="leading-tight"><p className="text-sm font-extrabold tracking-[-0.04em]">SA Hub</p><p className="text-[0.65rem] text-muted-foreground">Operations</p></div>}</div>;
 }
 
+function PhoneCaptureDialog({ required }: { required: boolean }) {
+  const [open, setOpen] = useState(required);
+  const [phone, setPhone] = useState("");
+  const [error, setError] = useState("");
+  const utils = trpc.useUtils();
+  const save = trpc.localAuth.captureMyPhone.useMutation({
+    onSuccess: async () => { await utils.auth.status.invalidate(); setOpen(false); setPhone(""); setError(""); },
+    onError: issue => setError(issue.message),
+  });
+  useEffect(() => { if (required) setOpen(true); }, [required]);
+  const submit = () => {
+    if (!phone.trim()) { setError("Enter a phone number so the workspace can record your preferred contact route."); return; }
+    setError("");
+    save.mutate({ phone: phone.trim() });
+  };
+  return <Dialog open={open && required} onOpenChange={next => { if (!save.isPending) setOpen(next); }}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Add a contact phone number</DialogTitle><DialogDescription>On your first sign-in, add a phone number that your authorised manager can use for operational contact. It is stored as restricted account data and is not shown in this workspace.</DialogDescription></DialogHeader><div className="grid gap-2 py-2"><Label htmlFor="first-login-phone">Phone number</Label><Input id="first-login-phone" autoComplete="tel" inputMode="tel" value={phone} onChange={event => setPhone(event.target.value)} placeholder="+44 7700 900000" className="h-11 rounded-xl" aria-invalid={Boolean(error)} /><p className="text-xs leading-5 text-muted-foreground">Use 7–20 digits with an optional leading + country code.</p>{error ? <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900">{error}</p> : null}</div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)} disabled={save.isPending}>Remind me later</Button><Button onClick={submit} disabled={save.isPending}>{save.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Save phone number</Button></DialogFooter></DialogContent></Dialog>;
+}
+
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
@@ -183,10 +205,16 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("hub-auth-feedback", onFeedback);
   }, []);
   useEffect(() => {
-    if (user?.operationalRole === "support_worker" && location === "/") setLocation("/keyworker-app");
+    if (user?.operationalRole !== "support_worker") return;
+    const frontlinePaths = ["/keyworker-app", "/key-worker", "/properties", "/care", "/staff", "/search"];
+    if (!frontlinePaths.some(path => location === path || location.startsWith(`${path}/`))) setLocation("/keyworker-app");
   }, [location, setLocation, user?.operationalRole]);
   const matchesLocation = (path: string) => path === location || (path !== "/" && location.startsWith(`${path}/`));
-  const operationalMenuItems = menuItems.filter(item => canViewWorkspaceNavigation(user?.operationalRole, item.path));
+  const operationalMenuItems = menuItems.filter(item => canViewWorkspaceNavigation(user?.operationalRole, item.path)).sort((left, right) => {
+    if (user?.operationalRole !== "support_worker") return 0;
+    const frontlineOrder: Record<string, number> = { "/keyworker-app": 0, "/properties": 1, "/care": 2, "/staff": 3 };
+    return (frontlineOrder[left.path] ?? 99) - (frontlineOrder[right.path] ?? 99);
+  });
   const scopedMenuItems = user?.role === "admin" && user.operationalRole === "platform_admin"
     ? [...operationalMenuItems, { icon: ShieldAlert, label: "Superadmin", path: "/superadmin" }]
     : operationalMenuItems;
@@ -197,7 +225,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <Sidebar collapsible="icon" className="border-r border-sidebar-border/70 bg-sidebar">
+      <Sidebar data-print-chrome collapsible="icon" className="border-r border-sidebar-border/70 bg-sidebar">
         <SidebarHeader className="p-3">
           <div className="flex h-12 items-center justify-between gap-2 px-1">
             <Brand collapsed={isCollapsed} />
@@ -227,7 +255,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       <SidebarInset className="min-w-0 bg-background">
         {accessFeedback && <div role="alert" className="flex items-start gap-3 border-b border-amber-300 bg-amber-50 px-4 py-3 text-amber-950 sm:px-6"><AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" /><div className="min-w-0 flex-1"><p className="text-sm font-extrabold">{accessFeedback.title}</p><p className="mt-0.5 text-xs leading-5">{accessFeedback.message} <span className="font-mono font-bold">{accessFeedback.code}</span></p>{(entity?.supportEmail || entity?.supportPhone) && <p className="mt-2 text-xs font-semibold">Support: {entity.supportContactName ? `${entity.supportContactName} · ` : ""}{entity.supportEmail ?? entity.supportPhone}{entity.supportGuidance ? ` — ${entity.supportGuidance}` : ""}</p>}</div><button className="text-xs font-bold underline" onClick={() => setAccessFeedback(null)}>Dismiss</button></div>}
         <ConnectionStatus />
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/88 px-4 backdrop-blur-xl sm:px-6">
+        <header data-print-chrome className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border/60 bg-background/88 px-4 backdrop-blur-xl sm:px-6">
           <SidebarTrigger className="h-10 w-10 rounded-xl"><Menu className="h-5 w-5" /></SidebarTrigger>
           <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{active?.label ?? "Workspace"}</p><p className="truncate text-[0.68rem] text-muted-foreground">{entities.find(entity => entity.id === entityId)?.name ?? "Set up your first entity"}</p></div>
           <NotificationSoundControl enabled={notificationSound.enabled} supported={notificationSound.supported} onToggle={notificationSound.toggle} />
@@ -242,12 +270,18 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 }
 
 function MobileQuickNavigation({ role, onNavigate }: { role: string | null | undefined; onNavigate: (path: string) => void }) {
-  const items = [
+  const desktopItems = [
     { label: "Home", path: "/", icon: LayoutDashboard },
     { label: "Rota", path: "/rota", icon: CalendarDays },
     { label: "Keyworker", path: "/keyworker-app", icon: ClipboardCheck },
     { label: "Finance", path: "/finance", icon: HandCoins },
-  ].filter(item => canViewWorkspaceNavigation(role, item.path)).slice(0, 3);
+  ];
+  const keyworkerItems = [
+    { label: "Keyworker", path: "/keyworker-app", icon: ClipboardCheck },
+    { label: "Care", path: "/care", icon: HeartPulse },
+    { label: "Staff", path: "/staff", icon: UserRound },
+  ];
+  const items = (role === "support_worker" ? keyworkerItems : desktopItems).filter(item => canViewWorkspaceNavigation(role, item.path)).slice(0, 3);
   items.push({ label: "More", path: "/search", icon: Search });
   return <nav className={`fixed inset-x-3 bottom-3 z-40 grid rounded-2xl border border-border/70 bg-card/95 p-1.5 shadow-2xl backdrop-blur-xl ${items.length === 3 ? "grid-cols-3" : "grid-cols-4"}`} aria-label="Quick mobile navigation">
     {items.map(item => <button key={item.path} onClick={() => onNavigate(item.path)} className="flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[0.62rem] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"><item.icon className="h-4 w-4" />{item.label}</button>)}

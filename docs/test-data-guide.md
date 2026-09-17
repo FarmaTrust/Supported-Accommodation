@@ -7,9 +7,9 @@
 | Record type | Loaded scenario |
 | --- | --- |
 | Properties | Six TEST-labelled properties: TEST — Radford House at 30 Radford Road, TEST — Willow House, TEST — Meadow Lodge, TEST — Ash Grove, TEST — Harbour View and TEST — Cedar Mews |
-| Key Workers | Eleven clearly fictional active support-worker accounts and staff profiles |
+| Key Workers | Eighteen clearly fictional active support-worker accounts and staff profiles, with three assigned to each TEST property |
 | Young people | Eighteen reference-led fictional records, three active placements per property |
-| Rota | Eighty-four future 12-hour shifts across two weeks, assigned only to property-authorised fictional workers |
+| Rota | Five hundred and fifty-eight future eight-hour shifts across 31 operational days. Every TEST property has continuous 06:00–14:00, 14:00–22:00 and 22:00–06:00 cover, with no duplicate or overlapping fictional colleague assignment. |
 | Mock compliance evidence | Forty-two property certificate records, eleven staff certificate/training records, fifty-one approved clean scans, thirty-one in-app reminders and thirty-one inactive outbox records; every document is watermarked `TEST DATA — NOT VALID FOR USE` |
 | Governance | One `TEST-DR-001` ready information-rights case, one active source-linked training framework, one active training outcome measure and one encrypted test-only observation; every label states that it has no legal or operational effect |
 | Staff workspace | One TEST-only workforce profile is linked to the authorised TEST reviewer account so the self-service page can be accepted in its populated state; it is not a real staff record |
@@ -38,7 +38,7 @@ pnpm testdata:verify -- 1
 pnpm testdata:compliance:verify -- 1
 ```
 
-The scenario verifier executes the real loader twice and fails unless the TEST entity remains exactly six properties, eleven Key Workers, eighteen young people, three active placements per property and 84 shifts, with no scenario records left in the source entity. The compliance verifier loads the certificate evidence twice and fails unless 42 property records, 11 staff records, 51 approved clean scans and renewal notifications remain TEST-only and stable.
+The scenario verifier executes the real loader twice and fails unless the TEST entity remains exactly six properties, eighteen Key Workers, eighteen young people, three active placements per property and 558 shifts. It also fails on missing 24-hour interval cover, duplicate shift assignments, same-worker overlaps or scenario records left in the source entity. The compliance verifier loads the certificate evidence twice and fails unless 42 property records, 11 staff records, 51 approved clean scans and renewal notifications remain TEST-only and stable.
 
 ## Safety rules
 

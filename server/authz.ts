@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
   entityMemberships,
@@ -8,6 +8,7 @@ import {
   users,
   workerAssignments,
   placements,
+  shifts,
 } from "../drizzle/schema";
 import { getDb } from "./db";
 import { writeAuditEvent } from "./services/audit";
@@ -187,6 +188,58 @@ export async function listAccessiblePropertyIds(userId: number, entityId: number
   const rows = await db.select({ id: propertyAssignments.propertyId }).from(propertyAssignments)
     .where(and(eq(propertyAssignments.entityId, entityId), eq(propertyAssignments.userId, userId)));
   return rows.map(item => item.id);
+}
+
+/**
+ * Returns the properties a support worker is working at right now.  This is
+ * intentionally narrower than their standing property grants: a grant lets a
+ * manager schedule the worker; it does not by itself expose live operational
+ * records outside the worker's current shift.
+ */
+export async function listCurrentShiftPropertyIds(userId: number, entityId: number, capability: Capability, now = Date.now()) {
+  const access = await assertEntityCapability(userId, entityId, capability);
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+  if (access.role !== "support_worker") return listAccessiblePropertyIds(userId, entityId, capability);
+
+  const currentShifts = await db.select({ propertyId: shifts.propertyId }).from(shifts).where(and(
+    eq(shifts.entityId, entityId),
+    eq(shifts.assignedUserId, userId),
+    lte(shifts.startsAt, now),
+    gt(shifts.endsAt, now),
+    inArray(shifts.status, ["assigned", "confirmed", "in_progress"]),
+  ));
+  return Array.from(new Set(currentShifts.map(shift => shift.propertyId)));
+}
+
+/** Server-authoritative live-shift boundary for frontline property records. */
+export async function assertCurrentShiftPropertyCapability(userId: number, entityId: number, propertyId: number, capability: Capability, now = Date.now()) {
+  const access = await assertPropertyCapability(userId, entityId, propertyId, capability);
+  if (access.role !== "support_worker") return access;
+
+  const db = await getDb();
+  if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR" });
+  const [currentShift] = await db.select({ id: shifts.id }).from(shifts).where(and(
+    eq(shifts.entityId, entityId),
+    eq(shifts.propertyId, propertyId),
+    eq(shifts.assignedUserId, userId),
+    lte(shifts.startsAt, now),
+    gt(shifts.endsAt, now),
+    inArray(shifts.status, ["assigned", "confirmed", "in_progress"]),
+  )).limit(1);
+  if (currentShift) return access;
+
+  await writePermissionAudit({ actorUserId: userId, entityId, propertyId, action: "permission.property.current_shift", resourceType: "property", resourceId: propertyId, result: "denied", reasonCode: `current_shift_missing:${capability}` });
+  throw new TRPCError({ code: "FORBIDDEN", message: "This record is available only while you are on an assigned shift at this property." });
+}
+
+/** Applies the live-shift property boundary after the canonical placement check. */
+export async function assertCurrentShiftPlacementCapability(userId: number, placementId: number, capability: Capability, now = Date.now()) {
+  const result = await assertPlacementCapability(userId, placementId, capability);
+  if (result.access.role !== "support_worker") return result;
+  if (!result.placement.propertyId) throw new TRPCError({ code: "FORBIDDEN", message: "This placement is not available during your current shift." });
+  await assertCurrentShiftPropertyCapability(userId, result.placement.entityId, result.placement.propertyId, capability, now);
+  return result;
 }
 
 export async function assertPlacementCapability(userId: number, placementId: number, capability: Capability) {

@@ -36,6 +36,7 @@ const AccessControlPage = lazy(() => import("./pages/AccessControl"));
 const GuestInvitationPage = lazy(() => import("./pages/GuestInvitation"));
 const TemporaryLoginLinkPage = lazy(() => import("./pages/TemporaryLoginLink"));
 const SuperadminPage = lazy(() => import("./pages/Superadmin"));
+const NominatedIndividualAppPage = lazy(() => import("./pages/NominatedIndividualApp"));
 
 function Router() {
   return (
@@ -54,6 +55,7 @@ function Router() {
           <Route path={"/staff"} component={StaffWorkspacePage} />
           <Route path={"/staff-app"} component={StaffWorkspacePage} />
           <Route path={"/manager-app"} component={ManagerAppPage} />
+          <Route path={"/nominated-individual"} component={NominatedIndividualAppPage} />
           <Route path={"/keyworker-app"} component={KeyWorkerAppPage} />
           <Route path={"/access-control"} component={AccessControlPage} />
           <Route path={"/superadmin"} component={SuperadminPage} />

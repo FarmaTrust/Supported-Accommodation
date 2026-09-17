@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DictationTextarea } from "@/components/DictationFields";
+import { EvidenceFilePicker, fileToBase64, normaliseEvidenceMimeType } from "@/components/EvidenceFilePicker";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { trpc } from "@/lib/trpc";
 import { CalendarDays, ClipboardList, FileText, ShieldCheck, UserRound, UsersRound } from "lucide-react";
@@ -51,8 +52,31 @@ function StaffRequestDialog({ entityId }: { entityId: number }) {
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [details, setDetails] = useState("");
+  const [evidenceFiles, setEvidenceFiles] = useState<File[]>([]);
   const utils = trpc.useUtils();
-  const submit = trpc.staffWorkspace.submitStaffRequest.useMutation({ onSuccess: async () => { await utils.staffWorkspace.staffWorkspace.invalidate({ entityId }); setOpen(false); setStartsAt(""); setEndsAt(""); setDetails(""); toast.success("Request submitted", { description: "An authorised manager can now review it independently." }); }, onError: error => toast.error("Could not submit request", { description: error.message }) });
+  const submit = trpc.staffWorkspace.submitStaffRequest.useMutation();
+  const uploadEvidence = trpc.staffWorkspace.uploadEvidence.useMutation();
   const dateToMs = (value: string) => new Date(`${value}T12:00:00Z`).getTime();
-  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button className="rounded-xl">New request</Button></DialogTrigger><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>Submit a staff request</DialogTitle><DialogDescription>Submit only your own absence, availability, contact or evidence request. The detailed note is restricted to the review workflow.</DialogDescription></DialogHeader><div className="grid gap-4 py-2"><div className="grid gap-2"><Label>Request type</Label><Select value={requestType} onValueChange={value => setRequestType(value as RequestType)}><SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{requestTypes.map(type => <SelectItem key={type} value={type}>{readable(type)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-4 sm:grid-cols-2"><div className="grid gap-2"><Label htmlFor="staff-request-start">Start date</Label><Input id="staff-request-start" type="date" value={startsAt} onChange={event => setStartsAt(event.target.value)} /></div><div className="grid gap-2"><Label htmlFor="staff-request-end">End date</Label><Input id="staff-request-end" type="date" value={endsAt} onChange={event => setEndsAt(event.target.value)} /></div></div><div className="grid gap-2"><Label htmlFor="staff-request-details">Request details</Label><DictationTextarea id="staff-request-details" rows={6} value={details} onChange={event => setDetails(event.target.value)} placeholder="State only the information needed for the request and review." /></div></div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button><Button disabled={details.trim().length < 3 || submit.isPending} onClick={() => submit.mutate({ entityId, requestType, details: details.trim(), startsAt: startsAt ? dateToMs(startsAt) : undefined, endsAt: endsAt ? dateToMs(endsAt) : undefined })}>{submit.isPending ? "Submitting…" : "Submit request"}</Button></DialogFooter></DialogContent></Dialog>;
+  const requiresEvidenceOption = requestType === "certificate_submission" || requestType === "sickness";
+  const busy = submit.isPending || uploadEvidence.isPending;
+  const closeAndReset = () => { setOpen(false); setStartsAt(""); setEndsAt(""); setDetails(""); setEvidenceFiles([]); };
+  const send = async () => {
+    let requestId: number | undefined;
+    let uploadedFiles = 0;
+    try {
+      const request = await submit.mutateAsync({ entityId, requestType, details: details.trim(), startsAt: startsAt ? dateToMs(startsAt) : undefined, endsAt: endsAt ? dateToMs(endsAt) : undefined });
+      requestId = request.id;
+      for (const file of evidenceFiles) {
+        await uploadEvidence.mutateAsync({ entityId, title: `${readable(requestType)} evidence · ${file.name}`, fileName: file.name, mimeType: normaliseEvidenceMimeType(file) as "image/jpeg" | "image/png" | "image/webp" | "image/heic" | "application/pdf" | "application/msword" | "application/vnd.openxmlformats-officedocument.wordprocessingml.document", contentBase64: await fileToBase64(file), documentType: requestType === "certificate_submission" ? "certificate" : "evidence", classification: "hr", resourceType: "staff_request", resourceId: String(request.id), linkType: requestType === "certificate_submission" ? "certificate" : "evidence" });
+        uploadedFiles += 1;
+      }
+      await utils.staffWorkspace.staffWorkspace.invalidate({ entityId });
+      closeAndReset();
+      toast.success("Request submitted", { description: evidenceFiles.length ? `${evidenceFiles.length} supporting file${evidenceFiles.length === 1 ? " was" : "s were"} securely attached for independent review.` : "An authorised manager can now review it independently." });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Please review the request and try again.";
+      toast.error(requestId ? "Request submitted; evidence needs attention" : "Could not submit request", { description: requestId ? `${uploadedFiles} supporting file${uploadedFiles === 1 ? " was" : "s were"} attached. ${errorMessage}` : errorMessage });
+    }
+  };
+  return <Dialog open={open} onOpenChange={nextOpen => { if (!busy) setOpen(nextOpen); }}><DialogTrigger asChild><Button className="rounded-xl">New request</Button></DialogTrigger><DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-lg"><DialogHeader><DialogTitle>Submit a staff request</DialogTitle><DialogDescription>Submit only your own absence, availability, contact or evidence request. The detailed note and any uploaded file are restricted to the independent review workflow.</DialogDescription></DialogHeader><div className="grid gap-4 py-2"><div className="grid gap-2"><Label>Request type</Label><Select value={requestType} onValueChange={value => { setRequestType(value as RequestType); if (!["certificate_submission", "sickness"].includes(value)) setEvidenceFiles([]); }}><SelectTrigger className="h-11 rounded-xl"><SelectValue /></SelectTrigger><SelectContent>{requestTypes.map(type => <SelectItem key={type} value={type}>{readable(type)}</SelectItem>)}</SelectContent></Select></div><div className="grid gap-4 sm:grid-cols-2"><div className="grid gap-2"><Label htmlFor="staff-request-start">Start date</Label><Input id="staff-request-start" type="date" value={startsAt} onChange={event => setStartsAt(event.target.value)} /></div><div className="grid gap-2"><Label htmlFor="staff-request-end">End date</Label><Input id="staff-request-end" type="date" value={endsAt} onChange={event => setEndsAt(event.target.value)} /></div></div><div className="grid gap-2"><Label htmlFor="staff-request-details">Request details</Label><DictationTextarea id="staff-request-details" rows={6} value={details} onChange={event => setDetails(event.target.value)} placeholder="State only the information needed for the request and review." /><p className="text-xs leading-5 text-muted-foreground">Use the microphone if helpful, then check spelling and amend the editable text before submitting.</p></div>{requiresEvidenceOption ? <EvidenceFilePicker files={evidenceFiles} onChange={setEvidenceFiles} disabled={busy} label={requestType === "certificate_submission" ? "Certificate scan or photo" : "Sickness document scan or photo"} description={requestType === "certificate_submission" ? "Upload one or more pages of the certificate or training record." : "Upload a fit note or other approved supporting document only when necessary."} /> : null}</div><DialogFooter><Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button><Button disabled={details.trim().length < 3 || busy} onClick={() => void send()}>{busy ? "Submitting…" : "Submit request"}</Button></DialogFooter></DialogContent></Dialog>;
 }

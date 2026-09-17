@@ -1,7 +1,8 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { complianceObligations, documents, entities, entityMemberships, localAuthorities, occupancyEvents, placements, properties, propertyEvidence, propertyUnits, users, workPlanActions, youngPeople } from "../../drizzle/schema";
-import { assertEntityCapability, assertPlacementCapability, assertPropertyCapability, getUserAccess, listAccessiblePropertyIds } from "../authz";
+import { complianceObligations, documents, entities, entityMemberships, localAuthorities, occupancyEvents, placements, properties, propertyEvidence, propertyUnits, users, workPlanActions, workerAssignments, youngPeople } from "../../drizzle/schema";
+import { assertCurrentShiftPropertyCapability, assertEntityCapability, assertPlacementCapability, assertPropertyCapability, getUserAccess, listAccessiblePropertyIds, listCurrentShiftPropertyIds } from "../authz";
 import { protectedProcedure, router } from "../_core/trpc";
 import { writeAuditEvent } from "../services/audit";
 import { encryptSensitive } from "../services/crypto";
@@ -81,9 +82,10 @@ export const entitiesRouter = router({
   }),
 
   properties: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-    await assertEntityCapability(ctx.user.id, input.entityId, "property.read");
+    const propertyIds = await listCurrentShiftPropertyIds(ctx.user.id, input.entityId, "property.read");
     const db = await requireDb();
-    return db.select().from(properties).where(eq(properties.entityId, input.entityId));
+    if (!propertyIds.length) return [];
+    return db.select().from(properties).where(and(eq(properties.entityId, input.entityId), inArray(properties.id, propertyIds)));
   }),
 
   createProperty: protectedProcedure
@@ -121,20 +123,39 @@ export const entitiesRouter = router({
     }),
 
   propertyDetail: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), propertyId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-    await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "property.read");
+    const access = await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "property.read");
     const db = await requireDb();
-    const [[property], units, history] = await Promise.all([
+    const [[property], units, rawHistory] = await Promise.all([
       db.select().from(properties).where(and(eq(properties.id, input.propertyId), eq(properties.entityId, input.entityId))).limit(1),
       db.select().from(propertyUnits).where(eq(propertyUnits.propertyId, input.propertyId)),
       db.select().from(occupancyEvents).where(eq(occupancyEvents.propertyId, input.propertyId)).orderBy(desc(occupancyEvents.effectiveAt)).limit(50),
     ]);
+    const historyPlacementIds = Array.from(new Set(rawHistory.map(item => item.placementId).filter((id): id is number => typeof id === "number")));
+    const permittedHistoryPlacementIds = access.role === "support_worker" && historyPlacementIds.length
+      ? new Set((await db.select({ placementId: workerAssignments.placementId }).from(workerAssignments).where(and(
+        eq(workerAssignments.entityId, input.entityId),
+        eq(workerAssignments.userId, ctx.user.id),
+        inArray(workerAssignments.placementId, historyPlacementIds),
+        inArray(workerAssignments.assignmentRole, ["key_worker", "co_worker"]),
+      ))).map(item => item.placementId))
+      : new Set(historyPlacementIds);
+    const residents = permittedHistoryPlacementIds.size
+      ? await db.select({ placementId: placements.id, reference: youngPeople.reference, preferredName: youngPeople.preferredName })
+        .from(placements).innerJoin(youngPeople, eq(youngPeople.id, placements.youngPersonId))
+        .where(and(eq(placements.entityId, input.entityId), inArray(placements.id, Array.from(permittedHistoryPlacementIds))))
+      : [];
+    const residentByPlacement = new Map(residents.map(resident => [resident.placementId, resident]));
+    const history = rawHistory.map(event => ({
+      ...event,
+      occupant: event.placementId && permittedHistoryPlacementIds.has(event.placementId) ? residentByPlacement.get(event.placementId) ?? null : null,
+    }));
     return { property, units, history };
   }),
 
   unitOccupancy: protectedProcedure.input(z.object({
     entityId: z.number().int().positive(), propertyId: z.number().int().positive(), unitId: z.number().int().positive(),
   })).query(async ({ ctx, input }) => {
-    await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "property.read");
+    await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "property.read");
     const db = await requireDb();
     const [unit] = await db.select({ id: propertyUnits.id, label: propertyUnits.label, status: propertyUnits.status })
       .from(propertyUnits).where(and(eq(propertyUnits.id, input.unitId), eq(propertyUnits.propertyId, input.propertyId))).limit(1);
@@ -167,7 +188,11 @@ export const entitiesRouter = router({
   }),
 
   propertyEvidence: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), propertyId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-    await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "compliance.read");
+    const { user } = await getUserAccess(ctx.user.id);
+    if (user.operationalRole === "support_worker") {
+      throw new TRPCError({ code: "FORBIDDEN", message: "Property safety, tenure and renewal evidence is not available in the Keyworker workspace. [PROPERTY_EVIDENCE_KEYWORKER_RESTRICTED]" });
+    }
+    await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "compliance.read");
     const db = await requireDb();
     const rows = await db.select().from(propertyEvidence).where(and(eq(propertyEvidence.entityId, input.entityId), eq(propertyEvidence.propertyId, input.propertyId))).orderBy(desc(propertyEvidence.dueAt));
     return rows.map(item => ({ ...item, ragStatus: item.dueAt ? calculateRagStatus(item.dueAt, item.status === "closed" ? item.updatedAt.getTime() : null, 30) : "grey" as const }));

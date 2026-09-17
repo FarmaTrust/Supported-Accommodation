@@ -241,3 +241,23 @@
     animation-iteration-count: 1 !important;
   }
 }
+
+@media print {
+  .care-print-mode [data-print-chrome],
+  .care-print-mode .no-print {
+    display: none !important;
+  }
+
+  .care-print-mode main {
+    padding: 0 !important;
+  }
+
+  .care-print-mode .surface {
+    box-shadow: none !important;
+    border: 1px solid #d1d5db;
+  }
+
+  .care-print-mode .care-history-row {
+    break-inside: avoid;
+  }
+}

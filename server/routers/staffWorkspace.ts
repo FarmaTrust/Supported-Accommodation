@@ -1,5 +1,5 @@
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lte, ne, or } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import {
@@ -13,7 +13,7 @@ import {
   residentValuables, safeguardingConcerns, shiftBreaks, shifts, staffProfiles, staffRequests,
   supervisionSessions, supportGoals, users, workerAssignments,
 } from "../../drizzle/schema";
-import { assertEntityCapability, assertPlacementCapability, assertPropertyCapability, getUserAccess, listAccessiblePropertyIds } from "../authz";
+import { assertCurrentShiftPlacementCapability, assertCurrentShiftPropertyCapability, assertEntityCapability, getUserAccess, listCurrentShiftPropertyIds } from "../authz";
 import { protectedProcedure, router } from "../_core/trpc";
 import { decryptSensitive, encryptSensitive } from "../services/crypto";
 import { writeAuditEvent } from "../services/audit";
@@ -38,7 +38,7 @@ async function assertManager(userId: number, entityId: number) {
 }
 
 async function assertPlacementScope(userId: number, input: { entityId: number; propertyId: number; placementId: number }, capability: "young_person.read" | "young_person.write" | "incident.write" | "medication.write" | "resident_finance.write") {
-  const result = await assertPlacementCapability(userId, input.placementId, capability);
+  const result = await assertCurrentShiftPlacementCapability(userId, input.placementId, capability);
   if (result.placement.entityId !== input.entityId || result.placement.propertyId !== input.propertyId) throw new TRPCError({ code: "FORBIDDEN", message: "Placement scope does not match the selected property" });
   return result;
 }
@@ -72,7 +72,7 @@ async function assertShiftActor(userId: number, shiftId: number) {
   const db = await requireDb();
   const [shift] = await db.select().from(shifts).where(eq(shifts.id, shiftId)).limit(1);
   if (!shift) throw new TRPCError({ code: "NOT_FOUND", message: "Shift not found" });
-  const access = await assertPropertyCapability(userId, shift.entityId, shift.propertyId, "frontline.write");
+  const access = await assertCurrentShiftPropertyCapability(userId, shift.entityId, shift.propertyId, "frontline.write");
   if (!roleIsManager(access.role) && shift.assignedUserId !== userId) throw new TRPCError({ code: "FORBIDDEN", message: "This shift is not assigned to you" });
   return { shift, access };
 }
@@ -85,14 +85,14 @@ async function assertEvidenceParent(userId: number, entityId: number, resourceTy
     const table = resourceType === "incident" ? incidents : resourceType === "property_visitor" ? propertyVisitors : resourceType === "property_check" ? propertyChecks : maintenanceJobs;
     const [row] = await db.select({ entityId: table.entityId, propertyId: table.propertyId }).from(table).where(and(eq(table.id, parsedId), eq(table.entityId, entityId))).limit(1);
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Parent record not found" });
-    await assertPropertyCapability(userId, entityId, row.propertyId, resourceType === "incident" ? "incident.write" : "frontline.write");
+    await assertCurrentShiftPropertyCapability(userId, entityId, row.propertyId, resourceType === "incident" ? "incident.write" : "frontline.write");
     return;
   }
   if (["key_worker_report", "keywork_session", "daily_note", "medication_discrepancy", "resident_finance_transaction"].includes(resourceType)) {
     const table = resourceType === "key_worker_report" ? keyWorkerReports : resourceType === "keywork_session" ? keyworkSessions : resourceType === "daily_note" ? dailyNotes : resourceType === "medication_discrepancy" ? medicationDiscrepancies : residentFinanceTransactions;
     const [row] = await db.select({ entityId: table.entityId, placementId: table.placementId }).from(table).where(and(eq(table.id, parsedId), eq(table.entityId, entityId))).limit(1);
     if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Parent record not found" });
-    await assertPlacementCapability(userId, row.placementId, resourceType === "medication_discrepancy" ? "medication.write" : resourceType === "resident_finance_transaction" ? "resident_finance.write" : "young_person.write");
+    await assertCurrentShiftPlacementCapability(userId, row.placementId, resourceType === "medication_discrepancy" ? "medication.write" : resourceType === "resident_finance_transaction" ? "resident_finance.write" : "young_person.write");
     return;
   }
   if (resourceType === "staff_request") {
@@ -106,12 +106,13 @@ async function assertEvidenceParent(userId: number, entityId: number, resourceTy
 
 export const staffWorkspaceRouter = router({
   context: protectedProcedure.input(entity).query(async ({ ctx, input }) => {
-    const propertyIds = await listAccessiblePropertyIds(ctx.user.id, input.entityId, "property.read");
+    const propertyIds = await listCurrentShiftPropertyIds(ctx.user.id, input.entityId, "property.read");
     const db = await requireDb();
     const { user, memberships } = await getUserAccess(ctx.user.id);
     const role = user.operationalRole === "owner" ? "owner" : memberships.find(item => item.entityId === input.entityId)?.operationalRole;
     const propertyRows = propertyIds.length ? await db.select().from(properties).where(inArray(properties.id, propertyIds)) : [];
-    const assignmentRows = role === "support_worker" ? await db.select({ placementId: workerAssignments.placementId }).from(workerAssignments).where(eq(workerAssignments.userId, ctx.user.id)) : [];
+    const now = Date.now();
+    const assignmentRows = role === "support_worker" ? await db.select({ placementId: workerAssignments.placementId }).from(workerAssignments).where(and(eq(workerAssignments.entityId, input.entityId), eq(workerAssignments.userId, ctx.user.id), or(isNull(workerAssignments.startsAt), lte(workerAssignments.startsAt, now)), or(isNull(workerAssignments.endsAt), gt(workerAssignments.endsAt, now)))) : [];
     const predicates = [eq(placements.entityId, input.entityId)];
     if (propertyIds.length) predicates.push(inArray(placements.propertyId, propertyIds));
     if (role === "support_worker") predicates.push(assignmentRows.length ? inArray(placements.id, assignmentRows.map(item => item.placementId)) : eq(placements.id, -1));
@@ -121,7 +122,7 @@ export const staffWorkspaceRouter = router({
   }),
 
   propertyWorkspace: protectedProcedure.input(propertyScope).query(async ({ ctx, input }) => {
-    await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "property.read");
+    await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "property.read");
     const db = await requireDb();
     const [visitors, checks, maintenance, loneWorkers, presence, rollCalls] = await Promise.all([
       db.select().from(propertyVisitors).where(and(eq(propertyVisitors.entityId, input.entityId), eq(propertyVisitors.propertyId, input.propertyId))).orderBy(desc(propertyVisitors.arrivedAt)),
@@ -131,7 +132,7 @@ export const staffWorkspaceRouter = router({
       db.select().from(propertyPresenceEvents).where(and(eq(propertyPresenceEvents.entityId, input.entityId), eq(propertyPresenceEvents.propertyId, input.propertyId))).orderBy(desc(propertyPresenceEvents.occurredAt)),
       db.select().from(emergencyRollCalls).where(and(eq(emergencyRollCalls.entityId, input.entityId), eq(emergencyRollCalls.propertyId, input.propertyId))).orderBy(desc(emergencyRollCalls.initiatedAt)),
     ]);
-    return { visitors: visitors.map(row => ({ ...row, name: decrypted(row.nameCiphertext), relationship: decrypted(row.relationshipCiphertext), purpose: decrypted(row.purposeCiphertext), notes: decrypted(row.notesCiphertext), nameCiphertext: undefined, relationshipCiphertext: undefined, purposeCiphertext: undefined, notesCiphertext: undefined, vehicleRegistrationCiphertext: undefined })), checks, maintenance, loneWorkers, presence, rollCalls };
+    return { visitors: visitors.map(row => ({ ...row, name: decrypted(row.nameCiphertext), relationship: decrypted(row.relationshipCiphertext), purpose: decrypted(row.purposeCiphertext), notes: decrypted(row.notesCiphertext), departureNotes: decrypted(row.departureNotesCiphertext), nameCiphertext: undefined, relationshipCiphertext: undefined, purposeCiphertext: undefined, notesCiphertext: undefined, departureNotesCiphertext: undefined, vehicleRegistrationCiphertext: undefined })), checks, maintenance, loneWorkers, presence, rollCalls };
   }),
 
   placementWorkspace: protectedProcedure.input(placementScope).query(async ({ ctx, input }) => {
@@ -186,9 +187,21 @@ export const staffWorkspaceRouter = router({
     return { reports, incidents: incidentRows, propertyChecks: checkRows, staffRequests: requestRows, medicationDiscrepancies: medicationRows, financeTransactions: transactionRows, reconciliations: reconciliationRows, financeDiscrepancies: financeDiscrepancyRows, safeguardingConcerns: concernRows, investigations: investigationRows };
   }),
 
+  evidenceReviewQueue: protectedProcedure.input(entity).query(async ({ ctx, input }) => {
+    await assertManager(ctx.user.id, input.entityId);
+    const db = await requireDb();
+    const rows = await db.select({ request: staffRequests, staffName: staffProfiles.fullName, documentId: documents.id, documentTitle: documents.title, documentStatus: documents.status, fileName: documentVersions.fileName, fileUrl: documentVersions.fileUrl, scanStatus: documentVersions.scanStatus }).from(staffRequests)
+      .innerJoin(staffProfiles, eq(staffProfiles.id, staffRequests.staffProfileId))
+      .leftJoin(documents, eq(documents.id, staffRequests.evidenceDocumentId))
+      .leftJoin(documentVersions, and(eq(documentVersions.documentId, documents.id), eq(documentVersions.version, documents.currentVersion)))
+      .where(and(eq(staffRequests.entityId, input.entityId), inArray(staffRequests.requestType, ["certificate_submission", "sickness"]), eq(staffRequests.status, "submitted")))
+      .orderBy(desc(staffRequests.createdAt));
+    return rows.map(row => ({ ...row.request, staffName: row.staffName, evidence: row.documentId ? { documentId: row.documentId, title: row.documentTitle, status: row.documentStatus, fileName: row.fileName, fileUrl: row.fileUrl, scanStatus: row.scanStatus } : null }));
+  }),
+
   arriveVisitor: protectedProcedure.input(propertyScope.extend({ placementId: id.optional(), visitorType: z.enum(["friend", "relative", "professional", "contractor", "public_official", "other"]), name: z.string().min(2).max(180), relationship: z.string().max(220).optional(), purpose: z.string().min(2).max(2000), idCheckStatus: z.enum(["not_required", "not_checked", "verified", "declined", "unavailable"]).default("not_checked"), identityDocumentId: id.optional(), expectedDepartureAt: z.number().int().optional(), notes: z.string().max(4000).optional() })).mutation(async ({ ctx, input }) => {
-    await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "frontline.write");
-    if (input.placementId) await assertPlacementCapability(ctx.user.id, input.placementId, "young_person.read");
+    await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "frontline.write");
+    if (input.placementId) await assertCurrentShiftPlacementCapability(ctx.user.id, input.placementId, "young_person.read");
     const db = await requireDb(); const now = Date.now();
     const { name, relationship, purpose, notes, ...values } = input;
     const [record] = await db.insert(propertyVisitors).values({ ...values, nameCiphertext: encrypted(name)!, relationshipCiphertext: encrypted(relationship), purposeCiphertext: encrypted(purpose)!, notesCiphertext: encrypted(notes), arrivedAt: now, createdBy: ctx.user.id }).$returningId();
@@ -197,12 +210,12 @@ export const staffWorkspaceRouter = router({
     return record;
   }),
 
-  departVisitor: protectedProcedure.input(entity.extend({ visitorId: id, expectedVersion: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+  departVisitor: protectedProcedure.input(entity.extend({ visitorId: id, expectedVersion: z.number().int().positive(), departureNotes: z.string().max(4000).optional() })).mutation(async ({ ctx, input }) => {
     const db = await requireDb(); const [visitor] = await db.select().from(propertyVisitors).where(and(eq(propertyVisitors.id, input.visitorId), eq(propertyVisitors.entityId, input.entityId))).limit(1);
-    if (!visitor) throw new TRPCError({ code: "NOT_FOUND" }); await assertPropertyCapability(ctx.user.id, input.entityId, visitor.propertyId, "frontline.write"); assertExpectedVersion(visitor.version, input.expectedVersion);
-    const now = Date.now(); await db.update(propertyVisitors).set({ departedAt: now, status: "departed", version: visitor.version + 1 }).where(eq(propertyVisitors.id, visitor.id));
+    if (!visitor) throw new TRPCError({ code: "NOT_FOUND" }); await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, visitor.propertyId, "frontline.write"); assertExpectedVersion(visitor.version, input.expectedVersion);
+    const now = Date.now(); await db.update(propertyVisitors).set({ departedAt: now, departureNotesCiphertext: encrypted(input.departureNotes), status: "departed", version: visitor.version + 1 }).where(eq(propertyVisitors.id, visitor.id));
     await db.insert(propertyPresenceEvents).values({ entityId: input.entityId, propertyId: visitor.propertyId, placementId: visitor.placementId, visitorId: visitor.id, personType: visitor.visitorType === "contractor" ? "contractor" : visitor.visitorType === "professional" || visitor.visitorType === "public_official" ? "professional" : "visitor", eventType: "departed", presenceState: "off_site", source: "visitor_log", occurredAt: now, createdBy: ctx.user.id });
-    await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: visitor.propertyId, action: "visitor.depart", resourceType: "property_visitor", resourceId: visitor.id, sensitivity: "restricted", result: "success", metadata: { visitorType: visitor.visitorType } });
+    await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: visitor.propertyId, action: "visitor.depart", resourceType: "property_visitor", resourceId: visitor.id, sensitivity: "restricted", result: "success", metadata: { visitorType: visitor.visitorType, departureNoteRecorded: Boolean(input.departureNotes?.trim()) } });
     return { success: true };
   }),
 
@@ -220,7 +233,7 @@ export const staffWorkspaceRouter = router({
   }),
 
   createPropertyCheck: protectedProcedure.input(propertyScope.extend({ unitId: id.optional(), placementId: id.optional(), shiftId: id.optional(), checkType: z.enum(["room_check", "property_check", "fire_check", "night_check", "health_safety", "welfare", "other"]), authorityBasis: z.enum(["scheduled", "consent", "risk_assessment", "emergency", "policy", "other"]), checklist: z.array(z.object({ key: z.string().min(1).max(80), label: z.string().min(1).max(180), result: z.enum(["pass", "fail", "not_applicable"]), note: z.string().max(1000).optional() })).min(1).max(100), findings: z.string().max(6000).optional(), privacyNotes: z.string().max(4000).optional(), youngPersonPresent: z.boolean().default(false), result: z.enum(["pass", "issues_found", "urgent_action"]), status: z.enum(["draft", "submitted"]).default("submitted") })).mutation(async ({ ctx, input }) => {
-    await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "frontline.write"); if (input.placementId) await assertPlacementCapability(ctx.user.id, input.placementId, "young_person.write"); const db = await requireDb();
+    await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "frontline.write"); if (input.placementId) await assertCurrentShiftPlacementCapability(ctx.user.id, input.placementId, "young_person.write"); const db = await requireDb();
     const { checklist, findings, privacyNotes, youngPersonPresent, ...values } = input; const [record] = await db.insert(propertyChecks).values({ ...values, checklistSnapshot: checklist, findingsCiphertext: encrypted(findings), privacyNotesCiphertext: encrypted(privacyNotes), youngPersonPresent: youngPersonPresent ? 1 : 0, completedAt: input.status === "submitted" ? Date.now() : undefined, createdBy: ctx.user.id }).$returningId();
     if (input.result === "urgent_action") await notifyManagers({ entityId: input.entityId, propertyId: input.propertyId, resourceType: "property_check", resourceId: record.id, category: "Urgent property check", urgent: true, deepLink: `/app/property/${input.propertyId}` }); return record;
   }),
@@ -231,12 +244,12 @@ export const staffWorkspaceRouter = router({
   }),
 
   createMaintenance: protectedProcedure.input(propertyScope.extend({ unitId: id.optional(), propertyCheckId: id.optional(), incidentId: id.optional(), title: z.string().min(3).max(220), category: z.enum(["plumbing", "electrical", "heating", "fire_safety", "security", "furniture", "appliance", "fabric", "pest", "cleaning", "other"]), priority: z.enum(["routine", "urgent", "emergency"]).default("routine"), description: z.string().min(5).max(6000), accessNotes: z.string().max(4000).optional(), targetAt: z.number().int().optional() })).mutation(async ({ ctx, input }) => {
-    await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "frontline.write"); const db = await requireDb(); const { description, accessNotes, ...values } = input; const [record] = await db.insert(maintenanceJobs).values({ ...values, descriptionCiphertext: encrypted(description)!, accessNotesCiphertext: encrypted(accessNotes), createdBy: ctx.user.id }).$returningId();
+    await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "frontline.write"); const db = await requireDb(); const { description, accessNotes, ...values } = input; const [record] = await db.insert(maintenanceJobs).values({ ...values, descriptionCiphertext: encrypted(description)!, accessNotesCiphertext: encrypted(accessNotes), createdBy: ctx.user.id }).$returningId();
     if (input.priority !== "routine") await notifyManagers({ entityId: input.entityId, propertyId: input.propertyId, resourceType: "maintenance_job", resourceId: record.id, category: "Urgent maintenance", urgent: input.priority === "emergency", deepLink: `/app/property/${input.propertyId}` }); return record;
   }),
 
   transitionMaintenance: protectedProcedure.input(entity.extend({ jobId: id, nextStatus: z.enum(["triaged", "assigned", "scheduled", "in_progress", "completed", "verified", "cancelled", "reopened"]), note: z.string().max(4000).optional(), assignedUserId: id.optional(), contractorName: z.string().max(220).optional(), expectedVersion: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
-    const db = await requireDb(); const [row] = await db.select().from(maintenanceJobs).where(and(eq(maintenanceJobs.id, input.jobId), eq(maintenanceJobs.entityId, input.entityId))).limit(1); if (!row) throw new TRPCError({ code: "NOT_FOUND" }); await assertPropertyCapability(ctx.user.id, input.entityId, row.propertyId, "frontline.write"); assertExpectedVersion(row.version, input.expectedVersion); assertWorkspaceTransition("maintenance", row.status, input.nextStatus);
+    const db = await requireDb(); const [row] = await db.select().from(maintenanceJobs).where(and(eq(maintenanceJobs.id, input.jobId), eq(maintenanceJobs.entityId, input.entityId))).limit(1); if (!row) throw new TRPCError({ code: "NOT_FOUND" }); await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, row.propertyId, "frontline.write"); assertExpectedVersion(row.version, input.expectedVersion); assertWorkspaceTransition("maintenance", row.status, input.nextStatus);
     if (input.nextStatus === "verified") { await assertManager(ctx.user.id, input.entityId); assertIndependentReviewer(row.createdBy, ctx.user.id); }
     await db.update(maintenanceJobs).set({ status: input.nextStatus, assignedUserId: input.assignedUserId ?? row.assignedUserId, contractorName: input.contractorName ?? row.contractorName, completedAt: input.nextStatus === "completed" ? Date.now() : row.completedAt, verifiedBy: input.nextStatus === "verified" ? ctx.user.id : row.verifiedBy, verifiedAt: input.nextStatus === "verified" ? Date.now() : row.verifiedAt, version: row.version + 1 }).where(eq(maintenanceJobs.id, row.id));
     await db.insert(maintenanceUpdates).values({ entityId: input.entityId, maintenanceJobId: row.id, updateType: input.nextStatus === "reopened" ? "reopen" : input.nextStatus === "completed" ? "completion" : "status_change", statusFrom: row.status, statusTo: input.nextStatus, noteCiphertext: encrypted(input.note), occurredAt: Date.now(), createdBy: ctx.user.id }); return { success: true };
@@ -271,15 +284,15 @@ export const staffWorkspaceRouter = router({
   }),
 
   linkReportSource: protectedProcedure.input(entity.extend({ reportId: id, sourceType: z.enum(["keywork_session", "daily_note", "support_goal", "appointment", "incident", "curfew_check", "medication", "finance"]), sourceId: z.string().min(1).max(80), linkReason: z.enum(["included", "summarised", "follow_up", "evidence"]).default("included") })).mutation(async ({ ctx, input }) => {
-    const db = await requireDb(); const [report] = await db.select().from(keyWorkerReports).where(and(eq(keyWorkerReports.id, input.reportId), eq(keyWorkerReports.entityId, input.entityId))).limit(1); if (!report) throw new TRPCError({ code: "NOT_FOUND" }); await assertPlacementCapability(ctx.user.id, report.placementId, "young_person.write"); if (!["draft", "returned"].includes(report.status)) throw workspaceFieldError("correction_required", "status", "Submitted report sources can only be changed through an approved correction addendum.", "CONFLICT"); const [record] = await db.insert(keyWorkerReportSources).values({ ...input, createdBy: ctx.user.id }).$returningId(); return record;
+    const db = await requireDb(); const [report] = await db.select().from(keyWorkerReports).where(and(eq(keyWorkerReports.id, input.reportId), eq(keyWorkerReports.entityId, input.entityId))).limit(1); if (!report) throw new TRPCError({ code: "NOT_FOUND" }); await assertCurrentShiftPlacementCapability(ctx.user.id, report.placementId, "young_person.write"); if (!["draft", "returned"].includes(report.status)) throw workspaceFieldError("correction_required", "status", "Submitted report sources can only be changed through an approved correction addendum.", "CONFLICT"); const [record] = await db.insert(keyWorkerReportSources).values({ ...input, createdBy: ctx.user.id }).$returningId(); return record;
   }),
 
   addIncidentPerson: protectedProcedure.input(entity.extend({ incidentId: id, personType: z.enum(["young_person", "staff", "professional", "visitor", "public", "other"]), placementId: id.optional(), userId: id.optional(), name: z.string().max(180).optional(), contact: z.string().max(320).optional(), roleDescription: z.string().max(180).optional(), involvement: z.enum(["affected", "witness", "reporter", "person_of_concern", "responding_professional", "other"]) })).mutation(async ({ ctx, input }) => {
-    const db = await requireDb(); const [incident] = await db.select().from(incidents).where(and(eq(incidents.id, input.incidentId), eq(incidents.entityId, input.entityId))).limit(1); if (!incident) throw new TRPCError({ code: "NOT_FOUND" }); await assertPropertyCapability(ctx.user.id, input.entityId, incident.propertyId, "incident.write"); if (!["pending", "returned"].includes(incident.managerReviewState)) throw workspaceFieldError("correction_required", "managerReviewState", "Incident details can only be changed through an approved correction after Manager review starts.", "CONFLICT"); const { name, contact, ...values } = input; const [record] = await db.insert(incidentPeople).values({ ...values, nameCiphertext: encrypted(name), contactCiphertext: encrypted(contact), createdBy: ctx.user.id }).$returningId(); return record;
+    const db = await requireDb(); const [incident] = await db.select().from(incidents).where(and(eq(incidents.id, input.incidentId), eq(incidents.entityId, input.entityId))).limit(1); if (!incident) throw new TRPCError({ code: "NOT_FOUND" }); await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, incident.propertyId, "incident.write"); if (!["pending", "returned"].includes(incident.managerReviewState)) throw workspaceFieldError("correction_required", "managerReviewState", "Incident details can only be changed through an approved correction after Manager review starts.", "CONFLICT"); const { name, contact, ...values } = input; const [record] = await db.insert(incidentPeople).values({ ...values, nameCiphertext: encrypted(name), contactCiphertext: encrypted(contact), createdBy: ctx.user.id }).$returningId(); return record;
   }),
 
   addIncidentReference: protectedProcedure.input(entity.extend({ incidentId: id, referenceType: z.enum(["police", "nhs", "local_authority", "ofsted", "lado", "insurance", "other"]), referenceValue: z.string().min(1).max(400), organisation: z.string().max(220).optional(), notes: z.string().max(3000).optional() })).mutation(async ({ ctx, input }) => {
-    const db = await requireDb(); const [incident] = await db.select().from(incidents).where(and(eq(incidents.id, input.incidentId), eq(incidents.entityId, input.entityId))).limit(1); if (!incident) throw new TRPCError({ code: "NOT_FOUND" }); await assertPropertyCapability(ctx.user.id, input.entityId, incident.propertyId, "incident.write"); const { referenceValue, notes, ...values } = input; const [record] = await db.insert(incidentReferences).values({ ...values, referenceValueCiphertext: encrypted(referenceValue)!, notesCiphertext: encrypted(notes), createdBy: ctx.user.id }).$returningId(); return record;
+    const db = await requireDb(); const [incident] = await db.select().from(incidents).where(and(eq(incidents.id, input.incidentId), eq(incidents.entityId, input.entityId))).limit(1); if (!incident) throw new TRPCError({ code: "NOT_FOUND" }); await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, incident.propertyId, "incident.write"); const { referenceValue, notes, ...values } = input; const [record] = await db.insert(incidentReferences).values({ ...values, referenceValueCiphertext: encrypted(referenceValue)!, notesCiphertext: encrypted(notes), createdBy: ctx.user.id }).$returningId(); return record;
   }),
 
   reviewIncident: protectedProcedure.input(entity.extend({ incidentId: id, decision: z.enum(["started", "returned", "approved", "follow_up", "closed"]), notes: z.string().max(5000).optional(), notificationAssessment: z.enum(["unchanged", "not_notifiable", "regulation_27", "other_notification"]).default("unchanged"), expectedVersion: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
@@ -309,12 +322,13 @@ export const staffWorkspaceRouter = router({
   }),
 
   reviewStaffRequest: protectedProcedure.input(entity.extend({ requestId: id, decision: z.enum(["approved", "declined", "returned"]), notes: z.string().max(4000).optional(), expectedVersion: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
-    await assertManager(ctx.user.id, input.entityId); const db = await requireDb(); const [row] = await db.select().from(staffRequests).where(and(eq(staffRequests.id, input.requestId), eq(staffRequests.entityId, input.entityId))).limit(1); if (!row) throw new TRPCError({ code: "NOT_FOUND" }); await assertHrAccess({ userId: ctx.user.id, entityId: input.entityId, subjectUserId: row.userId, mode: "write" }); assertIndependentReviewer(row.userId, ctx.user.id); assertExpectedVersion(row.version, input.expectedVersion); assertWorkspaceTransition("staff_request", row.status, input.decision);
+    await assertManager(ctx.user.id, input.entityId); const db = await requireDb(); const [row] = await db.select().from(staffRequests).where(and(eq(staffRequests.id, input.requestId), eq(staffRequests.entityId, input.entityId))).limit(1); if (!row) throw new TRPCError({ code: "NOT_FOUND" }); if (input.decision !== "approved" && (!input.notes || input.notes.trim().length < 10)) throw workspaceFieldError("staff_review_reason_required", "notes", "Add a clear reason of at least 10 characters before returning or rejecting this request."); await assertHrAccess({ userId: ctx.user.id, entityId: input.entityId, subjectUserId: row.userId, mode: "write" }); assertIndependentReviewer(row.userId, ctx.user.id); assertExpectedVersion(row.version, input.expectedVersion); assertWorkspaceTransition("staff_request", row.status, input.decision);
     const now = Date.now(); const outcomeAlert = buildStaffRequestOutcomeNotification({ userId: row.userId, requestId: row.id, outcome: input.decision, version: row.version + 1 });
     await db.transaction(async tx => {
       await tx.update(staffRequests).set({ status: input.decision, reviewNotesCiphertext: encrypted(input.notes), reviewedBy: ctx.user.id, reviewedAt: now, version: row.version + 1 }).where(eq(staffRequests.id, row.id));
       await tx.insert(notifications).values({ entityId: input.entityId, ...outcomeAlert }).onDuplicateKeyUpdate({ set: { title: outcomeAlert.title, message: outcomeAlert.message, severity: outcomeAlert.severity, deepLink: outcomeAlert.deepLink, readAt: null, resolvedAt: null, snoozedUntil: null, escalationState: "none" } });
     });
+    await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, action: "staff_request.reviewed", resourceType: "staff_request", resourceId: row.id, sensitivity: "hr", result: "success", metadata: { outcome: input.decision, evidenceAttached: Boolean(row.evidenceDocumentId), version: row.version + 1 } });
     await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, action: "staff_request.outcome_notification", resourceType: "staff_request", resourceId: row.id, sensitivity: "hr", result: "success", metadata: { outcome: input.decision, recipientUserId: row.userId, notificationDedupeKey: outcomeAlert.dedupeKey } });
     return { success: true, notificationQueued: true };
   }),
@@ -366,8 +380,8 @@ export const staffWorkspaceRouter = router({
     resourceType: z.string().min(2).max(80).optional(), resourceId: z.string().min(1).max(80).optional(), linkType: z.enum(["evidence", "photo", "id_document", "receipt", "certificate", "statement", "completion", "other"]).optional(),
   })).mutation(async ({ ctx, input }) => {
     await assertEntityCapability(ctx.user.id, input.entityId, "frontline.write");
-    if (input.propertyId) await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "frontline.write");
-    if (input.placementId) await assertPlacementCapability(ctx.user.id, input.placementId, "young_person.write");
+    if (input.propertyId) await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "frontline.write");
+    if (input.placementId) await assertCurrentShiftPlacementCapability(ctx.user.id, input.placementId, "young_person.write");
     if (["restricted", "safeguarding"].includes(input.classification)) await assertSensitiveAccess({ userId: ctx.user.id, entityId: input.entityId, placementId: input.placementId, sensitivity: input.classification, mode: "write" });
     if (Boolean(input.resourceType) !== Boolean(input.resourceId) || (input.resourceType && !input.linkType)) throw workspaceFieldError("evidence_link_incomplete", "resourceId", "A linked resource type, ID and link type must be provided together.");
     if (input.resourceType && input.resourceId) await assertEvidenceParent(ctx.user.id, input.entityId, input.resourceType, input.resourceId);
@@ -377,10 +391,11 @@ export const staffWorkspaceRouter = router({
     const stored = await storagePut(`hub/${input.entityId}/workspace/${ctx.user.id}/${Date.now()}-${safeName}`, bytes, input.mimeType);
     const hash = createHash("sha256").update(bytes).digest("hex");
     const db = await requireDb();
-    const result = await db.transaction(async tx => {
+      const result = await db.transaction(async tx => {
       const [document] = await tx.insert(documents).values({ entityId: input.entityId, propertyId: input.propertyId, title: input.title, documentType: input.documentType, classification: input.classification, status: "in_review", retentionUntil: input.retentionUntil, retentionBasis: input.retentionBasis, createdBy: ctx.user.id }).$returningId();
       await tx.insert(documentVersions).values({ documentId: document.id, version: 1, fileKey: stored.key, fileUrl: stored.url, fileName: safeName, mimeType: input.mimeType, sizeBytes: bytes.length, contentHash: hash, scanStatus: "not_available", createdBy: ctx.user.id });
       if (input.resourceType && input.resourceId && input.linkType) await tx.insert(recordDocumentLinks).values({ entityId: input.entityId, documentId: document.id, resourceType: input.resourceType, resourceId: input.resourceId, linkType: input.linkType, createdBy: ctx.user.id });
+      if (input.resourceType === "staff_request" && input.resourceId) await tx.update(staffRequests).set({ evidenceDocumentId: document.id }).where(and(eq(staffRequests.id, Number(input.resourceId)), eq(staffRequests.entityId, input.entityId), isNull(staffRequests.evidenceDocumentId)));
       return document;
     });
     await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, propertyId: input.propertyId, action: "workspace.evidence_upload", resourceType: "document", resourceId: result.id, sensitivity: input.classification, result: "success", metadata: { mimeType: input.mimeType, sizeBytes: bytes.length, linked: Boolean(input.resourceType), malwareScan: "not_available" } });

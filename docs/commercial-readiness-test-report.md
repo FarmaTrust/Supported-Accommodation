@@ -78,9 +78,9 @@ The final automated run completed TypeScript checking, all Vitest suites and a p
 | Verification gate | Result |
 | --- | --- |
 | `pnpm check` | Pass |
-| `pnpm test` | 42 test files; 142 tests passed |
+| `pnpm test` | 108 test files; 333 tests passed |
 | `pnpm build` | Pass; client and server production bundles generated |
-| `pnpm testdata:verify -- 1` | Pass; 6 properties, 11 Key Workers, 18 young people, 84 shifts, no source leakage |
+| `pnpm testdata:verify` | Pass; 6 properties, 18 Key Workers, 18 young people and 558 shifts across 31 days; zero coverage gaps, duplicate assignments, worker overlaps, property overlaps and source leakage |
 | `pnpm testdata:compliance:verify -- 1` | Pass; 42 property records, 11 staff records, 51 clean scans, 31 notifications, no source leakage |
 | Desktop smoke test | Pass; dashboard route loaded and rendered |
 | Phone smoke test | Pass; dashboard cards, controls and tabs remained usable at 375 × 812 |

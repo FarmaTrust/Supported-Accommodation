@@ -5,10 +5,11 @@ import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { automationRules, carePlans, complianceObligations, documents, invoices, notifications, placements, properties, propertyEvidence, recordShortcuts, savedViews, staffProfiles, workforceChecks, workPlanActions, workerAssignments, youngPeople } from "../../drizzle/schema";
 import { assertEntityCapability, getUserAccess, listAccessiblePropertyIds, roleHasCapability } from "../authz";
-import { createHeartbeatJob } from "../_core/heartbeat";
+import { createHeartbeatJob, updateHeartbeatJob } from "../_core/heartbeat";
 import { protectedProcedure, router } from "../_core/trpc";
 import { runAutomationEvaluation } from "../services/automation";
 import { writeAuditEvent } from "../services/audit";
+import { evidenceReminderCron, normaliseEvidenceReminderConfiguration } from "../services/evidenceReminders";
 import { requireDb } from "./shared";
 
 export const workspaceRouter = router({
@@ -121,11 +122,33 @@ export const workspaceRouter = router({
   createDailyAutomation: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), cron: z.string().regex(/^\d+\s+\d+\s+\d+\s+\S+\s+\S+\s+\S+$/).default("0 0 7 * * *") })).mutation(async ({ ctx, input }) => {
     await assertEntityCapability(ctx.user.id, input.entityId, "compliance.write");
     const db = await requireDb();
-    const [rule] = await db.insert(automationRules).values({ entityId: input.entityId, name: "Daily operations and renewal checks", ruleType: "compliance", configuration: { includes: ["compliance", "property_certificates", "staff_checks", "staff_training", "reviews", "work_plans", "policies", "placements", "invoices"] }, createdBy: ctx.user.id }).$returningId();
+    const [rule] = await db.insert(automationRules).values({ entityId: input.entityId, name: "Daily operations and renewal checks", ruleType: "compliance", configuration: { includes: ["compliance", "property_certificates", "staff_checks", "staff_training", "reviews", "work_plans", "policies", "placements", "invoices", "rota_coverage"] }, createdBy: ctx.user.id }).$returningId();
     const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
-    const job = await createHeartbeatJob({ name: `operations-checks-${input.entityId}-${rule.id}`, cron: input.cron, path: "/api/scheduled/operations-automation", description: "Evaluates property certificates, staff checks and training renewals, reviews, work plans, policies, placement milestones and invoices" }, sessionToken);
+    const job = await createHeartbeatJob({ name: `operations-checks-${input.entityId}-${rule.id}`, cron: input.cron, path: "/api/scheduled/operations-automation", description: "Evaluates rota coverage, property certificates, staff checks and training renewals, reviews, work plans, policies, placement milestones and invoices" }, sessionToken);
     await db.update(automationRules).set({ scheduleCronTaskUid: job.taskUid }).where(eq(automationRules.id, rule.id));
     return { id: rule.id, nextExecutionAt: job.nextExecutionAt ?? null };
+  }),
+
+  evidenceReminderSettings: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    const access = await assertEntityCapability(ctx.user.id, input.entityId, "compliance.write");
+    if (!["owner", "registered_manager"].includes(access.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Only an Owner or Registered Manager can view evidence reminder settings" });
+    const db = await requireDb();
+    const [rule] = await db.select().from(automationRules).where(and(eq(automationRules.entityId, input.entityId), eq(automationRules.ruleType, "evidence"))).limit(1);
+    return rule ? { id: rule.id, enabled: Boolean(rule.enabled), configuration: normaliseEvidenceReminderConfiguration(rule.configuration as Partial<ReturnType<typeof normaliseEvidenceReminderConfiguration>>), scheduleCronTaskUid: rule.scheduleCronTaskUid, lastRunAt: rule.lastRunAt } : null;
+  }),
+
+  saveEvidenceReminderSettings: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), enabled: z.boolean(), staffEvidenceReviewHours: z.number().int().min(1).max(720), documentReviewLeadDays: z.number().int().min(1).max(365), retentionReviewLeadDays: z.number().int().min(1).max(365), runAtHourUtc: z.number().int().min(0).max(23).default(7) })).mutation(async ({ ctx, input }) => {
+    const access = await assertEntityCapability(ctx.user.id, input.entityId, "compliance.write");
+    if (!["owner", "registered_manager"].includes(access.role)) throw new TRPCError({ code: "FORBIDDEN", message: "Only an Owner or Registered Manager can configure evidence reminders" });
+    const db = await requireDb(); const configuration = normaliseEvidenceReminderConfiguration(input); const cron = evidenceReminderCron(input.runAtHourUtc); const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
+    let [rule] = await db.select().from(automationRules).where(and(eq(automationRules.entityId, input.entityId), eq(automationRules.ruleType, "evidence"))).limit(1);
+    if (!rule) { const [created] = await db.insert(automationRules).values({ entityId: input.entityId, name: "Evidence review and retention reminders", ruleType: "evidence", configuration, enabled: input.enabled ? 1 : 0, createdBy: ctx.user.id }).$returningId(); rule = (await db.select().from(automationRules).where(eq(automationRules.id, created.id)).limit(1))[0]!; }
+    let nextExecutionAt: string | null = null;
+    if (rule.scheduleCronTaskUid) nextExecutionAt = (await updateHeartbeatJob(rule.scheduleCronTaskUid, { cron, enable: input.enabled, description: "Evaluates staff evidence review, document review dates and retention reviews" }, sessionToken)).nextExecutionAt ?? null;
+    else if (input.enabled) { const job = await createHeartbeatJob({ name: `evidence-reminders-${input.entityId}-${rule.id}`, cron, path: "/api/scheduled/operations-automation", description: "Evaluates staff evidence review, document review dates and retention reviews" }, sessionToken); await db.update(automationRules).set({ scheduleCronTaskUid: job.taskUid }).where(eq(automationRules.id, rule.id)); nextExecutionAt = job.nextExecutionAt ?? null; }
+    await db.update(automationRules).set({ configuration, enabled: input.enabled ? 1 : 0 }).where(eq(automationRules.id, rule.id));
+    await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, action: "automation.evidence_reminders.configure", resourceType: "automation_rule", resourceId: rule.id, result: "success", metadata: { enabled: input.enabled, staffEvidenceReviewHours: configuration.staffEvidenceReviewHours, documentReviewLeadDays: configuration.documentReviewLeadDays, retentionReviewLeadDays: configuration.retentionReviewLeadDays, runAtHourUtc: input.runAtHourUtc, heartbeatConfigured: Boolean(rule.scheduleCronTaskUid || input.enabled) } });
+    return { id: rule.id, nextExecutionAt };
   }),
 
   runAutomationNow: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {

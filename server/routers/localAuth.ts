@@ -18,6 +18,14 @@ const emailInput = z.string().trim().email().max(320);
 const passwordInput = z.string().min(1).max(256);
 const publicFailure = () => new TRPCError({ code: "UNAUTHORIZED", message: "Unable to sign in with those details. Check the email and password, or contact your administrator." });
 
+function normaliseContactPhone(value: string) {
+  const compact = value.trim().replace(/[\s().-]/g, "");
+  if (!/^\+?[0-9]{7,20}$/.test(compact)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Enter a valid phone number using 7 to 20 digits, with an optional leading + country code." });
+  }
+  return compact;
+}
+
 function tokenMatches(actual: string, configured: string) {
   const left = Buffer.from(actual); const right = Buffer.from(configured);
   return left.length === right.length && timingSafeEqual(left, right);
@@ -115,6 +123,14 @@ export const localAuthRouter = router({
     const result = await createOrReplaceLocalCredential({ userId: ctx.user.id, email: ctx.user.email, password: input.password, requireChangeOnNextLogin: false });
     await issueLocalSession(ctx, ctx.user, result.passwordVersion);
     await writeAuditEvent({ actorUserId: ctx.user.id, action: "auth.local.password_set", resourceType: "local_auth_credential", resourceId: ctx.user.id, sensitivity: "restricted", result: "success", reasonCode: result.created ? "local_credential_created" : "local_password_changed" });
+    return { success: true };
+  }),
+  captureMyPhone: protectedProcedure.input(z.object({ phone: z.string().trim().min(7).max(60) })).mutation(async ({ ctx, input }) => {
+    const phone = normaliseContactPhone(input.phone);
+    const database = await db.getDb();
+    if (!database) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Account details are temporarily unavailable. Please try again." });
+    await database.update(users).set({ phone, phoneCapturedAt: Date.now() }).where(eq(users.id, ctx.user.id));
+    await writeAuditEvent({ actorUserId: ctx.user.id, action: "user_profile.phone_capture", resourceType: "user", resourceId: ctx.user.id, sensitivity: "restricted", result: "success", metadata: { phoneLength: phone.length, firstCapture: !ctx.user.phoneCapturedAt } });
     return { success: true };
   }),
   adminSetPassword: protectedProcedure.input(z.object({ entityId: z.number().int().positive(), email: emailInput, displayName: z.string().trim().min(2).max(180).optional(), temporaryPassword: passwordInput, reason: z.string().trim().min(12).max(1000) })).mutation(async ({ ctx, input }) => {

@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { entities, entityMemberships, localAuthCredentials, placements, properties, propertyAssignments, users, workerAssignments } from "../../drizzle/schema";
+import { entities, entityMemberships, localAuthCredentials, placements, properties, propertyAssignments, staffProfiles, users, workerAssignments } from "../../drizzle/schema";
 import { getDb, getUserByEmail } from "../db";
 import { writeAuditEvent } from "./audit";
 import { createOrReplaceLocalCredential, normaliseLocalEmail } from "./localAuth";
@@ -53,6 +53,8 @@ export async function provisionTestRoleAccounts(password: string | undefined, op
         .onDuplicateKeyUpdate({ set: { startsAt: now, endsAt: null } });
       await db.update(workerAssignments).set({ endsAt: now }).where(and(eq(workerAssignments.entityId, entity.id), eq(workerAssignments.userId, user.id)));
       for (const placement of keyworkerPlacementRows) await db.insert(workerAssignments).values({ entityId: entity.id, placementId: placement.id, userId: user.id, assignmentRole: "key_worker", startsAt: now }).onDuplicateKeyUpdate({ set: { startsAt: now, endsAt: null } });
+      await db.insert(staffProfiles).values({ entityId: entity.id, userId: user.id, employeeNumber: "TEST-KW-AUTH-001", fullName: spec.name, email, phone: "07700 900004", jobTitle: "TEST Key Worker", employmentType: "permanent", startDate: now, status: "active", createdBy: user.id })
+        .onDuplicateKeyUpdate({ set: { fullName: spec.name, email, phone: "07700 900004", jobTitle: "TEST Key Worker", employmentType: "permanent", status: "active" } });
     }
     const [credential] = await db.select({ id: localAuthCredentials.id }).from(localAuthCredentials).where(eq(localAuthCredentials.userId, user.id)).limit(1);
     const credentialReplaced = shouldReplaceTestCredential({ hasCredential: Boolean(credential), resetCredentials: options.resetCredentials });

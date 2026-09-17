@@ -29,18 +29,30 @@ import { colleagueInvitationsRouter } from "./routers/colleagueInvitations";
 import { localAuthRouter } from "./routers/localAuth";
 import { superadminRouter } from "./routers/superadmin";
 import { temporaryLoginLinksRouter } from "./routers/temporaryLoginLinks";
+import { nominatedIndividualRouter } from "./routers/nominatedIndividual";
+import { recordExportsRouter } from "./routers/recordExports";
 import { requiresLocalPasswordChange } from "./services/localAuth";
 
 export const appRouter = router({
     // if you need to use socket.io, read and register route in server/_core/index.ts, all api should start with '/api/' so that the gateway can route correctly
   system: systemRouter,
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
-    status: publicProcedure.query(async opts => ({
-      user: opts.ctx.user,
-      issue: opts.ctx.user ? null : (opts.ctx.authIssue ?? null),
-      passwordChangeRequired: opts.ctx.user ? await requiresLocalPasswordChange(opts.ctx.user.id) : false,
-    })),
+    me: publicProcedure.query(opts => {
+      if (!opts.ctx.user) return null;
+      const { phone, phoneCapturedAt, ...safeUser } = opts.ctx.user;
+      return safeUser;
+    }),
+    status: publicProcedure.query(async opts => {
+      const user = opts.ctx.user;
+      if (!user) return { user: null, issue: opts.ctx.authIssue ?? null, passwordChangeRequired: false, phoneCaptureRequired: false };
+      const { phone, phoneCapturedAt, ...safeUser } = user;
+      return {
+        user: safeUser,
+        issue: null,
+        passwordChangeRequired: await requiresLocalPasswordChange(user.id),
+        phoneCaptureRequired: !phone || !phoneCapturedAt,
+      };
+    }),
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, cookieOptions);
@@ -76,6 +88,8 @@ export const appRouter = router({
   localAuth: localAuthRouter,
   temporaryLoginLinks: temporaryLoginLinksRouter,
   superadmin: superadminRouter,
+  nominatedIndividual: nominatedIndividualRouter,
+  recordExports: recordExportsRouter,
 
   // TODO: add feature routers here, e.g.
   // todo: router({

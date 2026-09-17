@@ -1,7 +1,7 @@
-import { and, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { documentTemplates, incidents, keyWorkerReports, placements, properties, users, workerAssignments, youngPeople } from "../../drizzle/schema";
-import { assertPlacementCapability, assertPropertyCapability, getUserAccess, listAccessiblePropertyIds } from "../authz";
+import { assertCurrentShiftPlacementCapability, assertCurrentShiftPropertyCapability, getUserAccess, listCurrentShiftPropertyIds } from "../authz";
 import { protectedProcedure, router } from "../_core/trpc";
 import { writeAuditEvent } from "../services/audit";
 import { summariseReportCompletion } from "../services/reportCompletion";
@@ -17,14 +17,20 @@ const reportFields = z.object({
 
 export const keyworkRouter = router({
   context: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-    const propertyIds = await listAccessiblePropertyIds(ctx.user.id, input.entityId, "young_person.read");
+    const propertyIds = await listCurrentShiftPropertyIds(ctx.user.id, input.entityId, "young_person.read");
     const db = await requireDb();
     const propertyRows = propertyIds.length ? await db.select().from(properties).where(inArray(properties.id, propertyIds)) : [];
     const { user, memberships } = await getUserAccess(ctx.user.id);
     const role = user.operationalRole === "owner" ? "owner" : memberships.find(item => item.entityId === input.entityId)?.operationalRole;
-    const assignments = role === "support_worker" ? await db.select({ placementId: workerAssignments.placementId }).from(workerAssignments).where(eq(workerAssignments.userId, ctx.user.id)) : [];
+    const now = Date.now();
+    const assignments = role === "support_worker" ? await db.select({ placementId: workerAssignments.placementId }).from(workerAssignments).where(and(
+      eq(workerAssignments.entityId, input.entityId),
+      eq(workerAssignments.userId, ctx.user.id),
+      or(isNull(workerAssignments.startsAt), lte(workerAssignments.startsAt, now)),
+      or(isNull(workerAssignments.endsAt), gt(workerAssignments.endsAt, now)),
+    )) : [];
     const assignmentIds = assignments.map(item => item.placementId);
-    if (role === "support_worker" && !assignmentIds.length) return { properties: propertyRows, placements: [] };
+    if (role === "support_worker" && (!propertyIds.length || !assignmentIds.length)) return { properties: [], placements: [] };
     const predicates = [eq(placements.entityId, input.entityId)];
     if (propertyIds.length) predicates.push(inArray(placements.propertyId, propertyIds));
     if (role === "support_worker") predicates.push(inArray(placements.id, assignmentIds));
@@ -35,7 +41,7 @@ export const keyworkRouter = router({
   }),
 
   reports: protectedProcedure.input(z.object({ placementId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-    await assertPlacementCapability(ctx.user.id, input.placementId, "young_person.read");
+    await assertCurrentShiftPlacementCapability(ctx.user.id, input.placementId, "young_person.read");
     const db = await requireDb();
     return db.select().from(keyWorkerReports).where(eq(keyWorkerReports.placementId, input.placementId)).orderBy(desc(keyWorkerReports.reportDate));
   }),
@@ -45,7 +51,7 @@ export const keyworkRouter = router({
     from: z.number().int().optional(),
     to: z.number().int().optional(),
   })).query(async ({ ctx, input }) => {
-    const propertyIds = await listAccessiblePropertyIds(ctx.user.id, input.entityId, "young_person.read");
+    const propertyIds = await listCurrentShiftPropertyIds(ctx.user.id, input.entityId, "young_person.read");
     const now = Date.now();
     const from = input.from ?? now - 7 * 86_400_000;
     const to = input.to ?? now;
@@ -78,7 +84,7 @@ export const keyworkRouter = router({
   }),
 
   createReport: protectedProcedure.input(reportFields).mutation(async ({ ctx, input }) => {
-    const { placement } = await assertPlacementCapability(ctx.user.id, input.placementId, "young_person.write");
+    const { placement } = await assertCurrentShiftPlacementCapability(ctx.user.id, input.placementId, "young_person.write");
     if (placement.propertyId !== input.propertyId || placement.entityId !== input.entityId) throw new Error("Placement scope does not match selected property");
     const db = await requireDb();
     const [result] = await db.insert(keyWorkerReports).values({ ...input, authorUserId: ctx.user.id }).$returningId();
@@ -87,7 +93,7 @@ export const keyworkRouter = router({
   }),
 
   incidents: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-    const propertyIds = await listAccessiblePropertyIds(ctx.user.id, input.entityId, "incident.read");
+    const propertyIds = await listCurrentShiftPropertyIds(ctx.user.id, input.entityId, "incident.read");
     if (!propertyIds.length) return [];
     const db = await requireDb();
     return db.select().from(incidents).where(inArray(incidents.propertyId, propertyIds)).orderBy(desc(incidents.occurredAt));
@@ -99,8 +105,11 @@ export const keyworkRouter = router({
     severity: z.enum(["low", "medium", "high", "critical"]), occurredAt: z.number().int(), summary: z.string().min(5).max(240),
     details: z.string().min(20).max(12000), immediateActions: z.string().max(8000).optional(), templateId: z.number().int().positive().optional(),
   })).mutation(async ({ ctx, input }) => {
-    await assertPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "incident.write");
-    if (input.placementId) await assertPlacementCapability(ctx.user.id, input.placementId, "incident.write");
+    await assertCurrentShiftPropertyCapability(ctx.user.id, input.entityId, input.propertyId, "incident.write");
+    if (input.placementId) {
+      const { placement } = await assertCurrentShiftPlacementCapability(ctx.user.id, input.placementId, "incident.write");
+      if (placement.entityId !== input.entityId || placement.propertyId !== input.propertyId) throw new Error("Placement scope does not match the selected property");
+    }
     const notifiableCategories = new Set(["exploitation", "police", "abuse_allegation", "child_protection_enquiry", "restraint"]);
     const requiresReview = notifiableCategories.has(input.category) || input.severity === "critical";
     const db = await requireDb();

@@ -19,7 +19,7 @@ export function useAuth(options?: UseAuthOptions) {
 
   const logoutMutation = trpc.auth.logout.useMutation({
     onSuccess: () => {
-      utils.auth.status.setData(undefined, { user: null, issue: null, passwordChangeRequired: false });
+      utils.auth.status.setData(undefined, { user: null, issue: null, passwordChangeRequired: false, phoneCaptureRequired: false });
     },
   });
 
@@ -41,7 +41,7 @@ export function useAuth(options?: UseAuthOptions) {
       try {
         sessionStorage.removeItem("manus-cookie");
       } catch {}
-      utils.auth.status.setData(undefined, { user: null, issue: null, passwordChangeRequired: false });
+      utils.auth.status.setData(undefined, { user: null, issue: null, passwordChangeRequired: false, phoneCaptureRequired: false });
       await utils.auth.status.invalidate();
     }
   }, [logoutMutation, utils]);
@@ -62,6 +62,7 @@ export function useAuth(options?: UseAuthOptions) {
       error: statusQuery.error ?? logoutMutation.error ?? null,
       isAuthenticated: Boolean(statusQuery.data?.user),
       passwordChangeRequired: Boolean(statusQuery.data?.passwordChangeRequired),
+      phoneCaptureRequired: Boolean(statusQuery.data?.phoneCaptureRequired),
     };
   }, [
     statusQuery.data,

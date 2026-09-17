@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
-import { documentTemplates, documents, entities, feeSchedules, localAuthorities, properties, providerPacks, secureLinks } from "../../drizzle/schema";
+import { documentTemplates, documents, entities, exportJobs, feeSchedules, localAuthorities, printableRecordExports, properties, providerPacks, qualityReviewEvidence, qualityReviews, secureLinks } from "../../drizzle/schema";
 import { assertEntityCapability } from "../authz";
 import { protectedProcedure, publicProcedure, router } from "../_core/trpc";
 import { writeAuditEvent } from "../services/audit";
@@ -31,7 +31,15 @@ export const documentsRouter = router({
   list: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
     await assertEntityCapability(ctx.user.id, input.entityId, "document.read");
     const db = await requireDb();
-    return db.select().from(documents).where(eq(documents.entityId, input.entityId)).orderBy(desc(documents.updatedAt));
+    const [rows, controlledExports, qualityReports, qualityEvidence, inspectionPacks] = await Promise.all([
+      db.select().from(documents).where(eq(documents.entityId, input.entityId)).orderBy(desc(documents.updatedAt)),
+      db.select({ documentId: printableRecordExports.documentId }).from(printableRecordExports).where(eq(printableRecordExports.entityId, input.entityId)),
+      db.select({ documentId: qualityReviews.reportDocumentId }).from(qualityReviews).where(eq(qualityReviews.entityId, input.entityId)),
+      db.select({ documentId: qualityReviewEvidence.documentId }).from(qualityReviewEvidence).where(eq(qualityReviewEvidence.entityId, input.entityId)),
+      db.select({ documentId: exportJobs.documentId }).from(exportJobs).where(and(eq(exportJobs.entityId, input.entityId), eq(exportJobs.exportType, "inspection"))),
+    ]);
+    const controlledIds = new Set([...controlledExports, ...qualityReports, ...qualityEvidence, ...inspectionPacks].map(row => row.documentId).filter((id): id is number => id !== null));
+    return rows.filter(row => !controlledIds.has(row.id));
   }),
 
   createMetadata: protectedProcedure.input(z.object({

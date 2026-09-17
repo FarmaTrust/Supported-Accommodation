@@ -1,7 +1,7 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { carePlans, documentTemplates, localAuthorities, placements, properties, workerAssignments, youngPeople } from "../../drizzle/schema";
-import { assertEntityCapability, assertPlacementCapability, getUserAccess, listAccessiblePropertyIds } from "../authz";
+import { assertCurrentShiftPlacementCapability, assertEntityCapability, assertPlacementCapability, getUserAccess, listCurrentShiftPropertyIds } from "../authz";
 import { protectedProcedure, router } from "../_core/trpc";
 import { writeAuditEvent } from "../services/audit";
 import { requireDb } from "./shared";
@@ -10,13 +10,14 @@ import {encryptSensitive} from "../services/crypto";
 
 export const placementsRouter = router({
   list: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-    const propertyIds = await listAccessiblePropertyIds(ctx.user.id, input.entityId, "young_person.read");
+    const propertyIds = await listCurrentShiftPropertyIds(ctx.user.id, input.entityId, "young_person.read");
     const { user, memberships } = await getUserAccess(ctx.user.id);
     const role = user.operationalRole === "owner" ? "owner" : memberships.find(item => item.entityId === input.entityId)?.operationalRole;
     const db = await requireDb();
     let permittedPlacementIds: number[] | undefined;
     if (role === "support_worker") {
-      const assignments = await db.select({ id: workerAssignments.placementId }).from(workerAssignments).where(eq(workerAssignments.userId, ctx.user.id));
+      const now = Date.now();
+      const assignments = await db.select({ id: workerAssignments.placementId }).from(workerAssignments).where(and(eq(workerAssignments.entityId, input.entityId), eq(workerAssignments.userId, ctx.user.id), or(isNull(workerAssignments.startsAt), lte(workerAssignments.startsAt, now)), or(isNull(workerAssignments.endsAt), gt(workerAssignments.endsAt, now))));
       permittedPlacementIds = assignments.map(item => item.id);
       if (!permittedPlacementIds.length) {
         await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, action: "placement.list", resourceType: "placement", sensitivity: "safeguarding", result: "allowed", reasonCode: "assignment_filtered", metadata: { resultCount: 0 } });
@@ -72,7 +73,7 @@ export const placementsRouter = router({
   }),
 
   detail: protectedProcedure.input(z.object({ placementId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-    const { placement } = await assertPlacementCapability(ctx.user.id, input.placementId, "young_person.read");
+    const { placement } = await assertCurrentShiftPlacementCapability(ctx.user.id, input.placementId, "young_person.read");
     const db = await requireDb();
     const [row] = await db.select({ placement: placements, youngPerson: youngPeople, property: properties, authority: localAuthorities }).from(placements)
       .innerJoin(youngPeople, eq(youngPeople.id, placements.youngPersonId))
@@ -84,7 +85,7 @@ export const placementsRouter = router({
   }),
 
   plans: protectedProcedure.input(z.object({ placementId: z.number().int().positive() })).query(async ({ ctx, input }) => {
-    await assertPlacementCapability(ctx.user.id, input.placementId, "young_person.read");
+    await assertCurrentShiftPlacementCapability(ctx.user.id, input.placementId, "young_person.read");
     const db = await requireDb();
     return db.select().from(carePlans).where(eq(carePlans.placementId, input.placementId));
   }),
@@ -94,7 +95,7 @@ export const placementsRouter = router({
     summary: z.string().min(10).max(8000), reviewDueAt: z.number().int().optional(),
     content: z.record(z.string(), z.unknown()).optional(), templateId: z.number().int().positive().optional(),
   })).mutation(async ({ ctx, input }) => {
-    const { placement } = await assertPlacementCapability(ctx.user.id, input.placementId, "young_person.write");
+    const { placement } = await assertCurrentShiftPlacementCapability(ctx.user.id, input.placementId, "young_person.write");
     const db = await requireDb();
     const current = await db.select({ version: carePlans.version }).from(carePlans).where(and(eq(carePlans.placementId, input.placementId), eq(carePlans.planType, input.planType)));
     const version = Math.max(0, ...current.map(item => item.version)) + 1;

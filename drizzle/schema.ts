@@ -29,6 +29,9 @@ export const users = mysqlTable("users", {
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
+  /** Voluntary first-login contact number; never exposed outside the authenticated account context. */
+  phone: varchar("phone", { length: 40 }),
+  phoneCapturedAt: bigint("phoneCapturedAt", { mode: "number" }),
   role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
   operationalRole: mysqlEnum("operationalRole", [
     "platform_admin",
@@ -418,12 +421,19 @@ export const shifts = mysqlTable(
       .default("draft")
       .notNull(),
     coverageState: mysqlEnum("coverageState", ["covered", "at_risk", "uncovered"]).default("uncovered").notNull(),
+    /** Stable source interval for a manager-created replacement cover shift. */
+    coverageGapKey: varchar("coverageGapKey", { length: 180 }),
+    /** One-based slot within a deficit interval; prevents duplicate direct cover allocation. */
+    coverageGapSlot: int("coverageGapSlot"),
     notes: text("notes"),
     createdBy: int("createdBy").references(() => users.id),
     createdAt: timestamp("createdAt").defaultNow().notNull(),
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
-  table => [index("shift_property_time_idx").on(table.propertyId, table.startsAt, table.status)],
+  table => [
+    index("shift_property_time_idx").on(table.propertyId, table.startsAt, table.status),
+    uniqueIndex("shift_coverage_gap_slot_uq").on(table.propertyId, table.coverageGapKey, table.coverageGapSlot),
+  ],
 );
 
 export const shiftRequests = mysqlTable(
@@ -854,6 +864,44 @@ export const retentionReviews = mysqlTable(
     updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   },
   table => [index("retention_review_due_idx").on(table.entityId, table.reviewDueAt, table.status)],
+);
+
+/**
+ * A controlled request to release a printable operational record. The staged
+ * and approved PDFs live in object storage through documentVersions; this row
+ * deliberately holds scope, lifecycle and hashes only, never record prose.
+ */
+export const printableRecordExports = mysqlTable(
+  "printableRecordExports",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    entityId: int("entityId").notNull().references(() => entities.id),
+    propertyId: int("propertyId").references(() => properties.id),
+    placementId: int("placementId").references(() => placements.id),
+    timesheetId: int("timesheetId").references(() => timesheets.id),
+    exportType: mysqlEnum("exportType", ["young_person_compilation", "shift_register", "timesheet", "document_register"]).notNull(),
+    rangeStart: bigint("rangeStart", { mode: "number" }).notNull(),
+    rangeEnd: bigint("rangeEnd", { mode: "number" }).notNull(),
+    status: mysqlEnum("status", ["awaiting_approval", "returned", "declined", "generating", "ready", "failed"]).default("awaiting_approval").notNull(),
+    snapshotHash: varchar("snapshotHash", { length: 128 }).notNull(),
+    manifest: json("manifest").$type<Record<string, unknown>>().notNull(),
+    requestedBy: int("requestedBy").notNull().references(() => users.id),
+    reviewedBy: int("reviewedBy").references(() => users.id),
+    reviewerRole: varchar("reviewerRole", { length: 80 }),
+    reviewedAt: bigint("reviewedAt", { mode: "number" }),
+    reviewNotesCiphertext: text("reviewNotesCiphertext"),
+    documentId: int("documentId").references(() => documents.id),
+    releasedAt: bigint("releasedAt", { mode: "number" }),
+    errorCode: varchar("errorCode", { length: 80 }),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    index("printable_export_status_idx").on(table.entityId, table.status, table.createdAt),
+    index("printable_export_placement_idx").on(table.placementId, table.rangeStart),
+    index("printable_export_property_idx").on(table.propertyId, table.rangeStart),
+    index("printable_export_timesheet_idx").on(table.timesheetId),
+  ],
 );
 
 export const exportJobs = mysqlTable(
@@ -1287,7 +1335,7 @@ export const automationRules = mysqlTable(
     id: int("id").autoincrement().primaryKey(),
     entityId: int("entityId").references(() => entities.id),
     name: varchar("name", { length: 180 }).notNull(),
-    ruleType: mysqlEnum("ruleType", ["compliance", "review", "work_plan", "policy", "placement", "invoice"]).notNull(),
+    ruleType: mysqlEnum("ruleType", ["compliance", "review", "work_plan", "policy", "placement", "invoice", "evidence"]).notNull(),
     configuration: json("configuration").$type<Record<string, unknown>>().notNull(),
     scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }),
     enabled: int("enabled").default(1).notNull(),
@@ -1528,6 +1576,8 @@ export const curfewPlans = mysqlTable("curfewPlans", {
 	expectedLeaveTime: varchar({ length: 8 }),
 	expectedReturnTime: varchar({ length: 8 }).notNull(),
 	graceMinutes: int().default(15).notNull(),
+	templateId: int().references(() => documentTemplates.id),
+	templateVersion: int(),
 	instructionsCiphertext: text(),
 	escalationAfterMinutes: int().default(30).notNull(),
 	startsAt: bigint({ mode: "number" }).notNull(),
@@ -1764,6 +1814,8 @@ export const healthMonitoringPlans = mysqlTable("healthMonitoringPlans", {
 	entityId: int().notNull().references(() => entities.id),
 	placementId: int().notNull().references(() => placements.id),
 	monitoringType: mysqlEnum(['blood_pressure','blood_glucose','weight','temperature','seizure','sleep','nutrition','hydration','mental_wellbeing','pain','wound','other']).notNull(),
+	templateId: int().references(() => documentTemplates.id),
+	templateVersion: int(),
 	title: varchar({ length: 220 }).notNull(),
 	frequency: mysqlEnum(['as_required','once_daily','twice_daily','weekly','monthly','event_based','other']).notNull(),
 	instructionsCiphertext: text().notNull(),
@@ -1978,6 +2030,8 @@ export const medications = mysqlTable("medications", {
 	placementId: int().notNull().references(() => placements.id),
 	name: varchar({ length: 220 }).notNull(),
 	form: mysqlEnum(['tablet','capsule','liquid','inhaler','cream','injection','patch','drops','other']).notNull(),
+	templateId: int().references(() => documentTemplates.id),
+	templateVersion: int(),
 	dose: varchar({ length: 120 }).notNull(),
 	route: mysqlEnum(['oral','inhaled','topical','subcutaneous','intramuscular','eye','ear','nasal','other']).notNull(),
 	frequency: mysqlEnum(['once_daily','twice_daily','three_times_daily','four_times_daily','weekly','as_required','other']).notNull(),
@@ -2620,6 +2674,7 @@ export const propertyVisitors = mysqlTable("propertyVisitors", {
 	departedAt: bigint("departedAt", { mode: "number" }),
 	status: mysqlEnum("status", ["on_site", "departed", "overdue", "refused"]).default("on_site").notNull(),
 	notesCiphertext: text("notesCiphertext"),
+	departureNotesCiphertext: text("departureNotesCiphertext"),
 	version: int("version").default(1).notNull(),
 	createdBy: int("createdBy").notNull().references(() => users.id),
 	createdAt: timestamp("createdAt").defaultNow().notNull(),
