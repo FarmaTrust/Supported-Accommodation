@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { desc, eq } from "drizzle-orm";
-import { entities, entityMemberships, users } from "../../drizzle/schema";
+import { entities, entityMemberships, users, roles } from "../../drizzle/schema";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { writeAuditEvent } from "../services/audit";
@@ -20,7 +20,7 @@ export const superadminRouter = router({
     const [companyRows, membershipRows, userRows] = await Promise.all([
       db.select({ id: entities.id, name: entities.name, legalName: entities.legalName, status: entities.status, createdAt: entities.createdAt }).from(entities).orderBy(entities.name),
       db.select({ entityId: entityMemberships.entityId, userId: entityMemberships.userId, status: entityMemberships.status }).from(entityMemberships),
-      db.select({ id: users.id, name: users.name, email: users.email, role: users.role, operationalRole: users.operationalRole, accountStatus: users.accountStatus, lastSignedIn: users.lastSignedIn }).from(users).orderBy(desc(users.lastSignedIn)),
+      db.select({ id: users.id, name: users.name, email: users.email, role: roles.isAdminAccount, operationalRole: roles.slug, accountStatus: users.accountStatus, lastSignedIn: users.lastSignedIn }).from(users).innerJoin(roles, eq(roles.id, users.roleId)).orderBy(desc(users.lastSignedIn)),
     ]);
     const activeMemberCount = new Map<number, number>();
     for (const membership of membershipRows) if (membership.status === "active") activeMemberCount.set(membership.entityId, (activeMemberCount.get(membership.entityId) ?? 0) + 1);

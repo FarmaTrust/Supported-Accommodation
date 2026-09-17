@@ -1,5 +1,5 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
-import type { User } from "../../drizzle/schema";
+import type { ResolvedUser } from "../services/roleResolution";
 import { COOKIE_NAME } from "@shared/const";
 import type { AuthFeedbackCode } from "@shared/authFeedback";
 import { LegacySessionRetiredError, ProviderUnavailableError, sdk } from "./sdk";
@@ -8,14 +8,14 @@ import { getSessionCookieOptions } from "./cookies";
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
   res: CreateExpressContextOptions["res"];
-  user: User | null;
+  user: ResolvedUser | null;
   authIssue?: AuthFeedbackCode;
 };
 
 export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
-  let user: User | null = null;
+  let user: ResolvedUser | null = null;
   let authIssue: AuthFeedbackCode | undefined;
   const hasSessionSignal = Boolean(
     opts.req.headers.authorization?.startsWith("Bearer ") ||

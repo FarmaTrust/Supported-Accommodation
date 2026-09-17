@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { colleagueInvitations, entities, entityMemberships, localAuthCredentials, users } from "../../drizzle/schema";
+import { builtInRoleId } from "../services/roleResolution";
 import { assertEntityCapability } from "../authz";
 import * as db from "../db";
 import { ENV } from "../_core/env";
@@ -142,7 +143,7 @@ export const localAuthRouter = router({
     const [membershipBefore] = user ? await database.select({ id: entityMemberships.id }).from(entityMemberships).where(and(eq(entityMemberships.entityId, input.entityId), eq(entityMemberships.userId, user.id))).limit(1) : [];
     if (!membershipBefore && !pending) throw new TRPCError({ code: "FORBIDDEN", message: "Create an approved colleague invitation before issuing local credentials." });
     if (!user) {
-      const [created] = await database.insert(users).values({ openId: `local_${randomBytes(18).toString("base64url")}`, name: input.displayName ?? normalizedEmail.split("@")[0], email: normalizedEmail, loginMethod: "email_password", accountStatus: "active" }).$returningId();
+      const [created] = await database.insert(users).values({ openId: `local_${randomBytes(18).toString("base64url")}`, name: input.displayName ?? normalizedEmail.split("@")[0], email: normalizedEmail, loginMethod: "email_password", roleId: await builtInRoleId("support_worker"), accountStatus: "active" }).$returningId();
       user = (await db.getUserByOpenId((await database.select({ openId: users.openId }).from(users).where(eq(users.id, created.id)).limit(1))[0]!.openId))!;
     }
     const result = await createOrReplaceLocalCredential({ userId: user.id, email: normalizedEmail, password: input.temporaryPassword, requireChangeOnNextLogin: true });

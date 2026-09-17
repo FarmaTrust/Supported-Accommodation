@@ -32,16 +32,14 @@ export const users = mysqlTable("users", {
   /** Voluntary first-login contact number; never exposed outside the authenticated account context. */
   phone: varchar("phone", { length: 40 }),
   phoneCapturedAt: bigint("phoneCapturedAt", { mode: "number" }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
-  operationalRole: mysqlEnum("operationalRole", [
-    "platform_admin",
-    "owner",
-    "registered_manager",
-    "support_worker",
-    "hr_compliance",
-    "finance",
-    "read_only",
-  ]).default("support_worker").notNull(),
+  /**
+   * The workspace role, as a row in `roles`. Nothing reads this column directly: server/db.ts
+   * resolves it into the `role` and `operationalRole` fields every caller already expects.
+   *
+   * The database enforces the foreign key (see 0003_roles_table.sql). It is deliberately not
+   * declared here: users -> roles -> entities -> users is a cycle TypeScript cannot infer through.
+   */
+  roleId: int("roleId").notNull(),
   accountStatus: mysqlEnum("accountStatus", ["invited", "active", "suspended"])
     .default("active")
     .notNull(),
@@ -115,6 +113,56 @@ export const entities = mysqlTable(
   table => [index("entities_status_idx").on(table.status), uniqueIndex("entities_legal_name_uq").on(table.legalName)],
 );
 
+/**
+ * Every role in the system, built-in and admin-defined. The seven built-in rows carry
+ * `isBuiltIn = 1`, a null entityId (they are global) and a slug matching the workspace role that
+ * server/authz.ts enforces. A company-defined row names a `baseRole` and then widens it with
+ * managed capabilities or narrows it with denials, so it can never reach past its base.
+ */
+export const roles = mysqlTable(
+  "roles",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    /** Null for the built-in roles, which every company shares. */
+    entityId: int("entityId").references(() => entities.id),
+    name: varchar("name", { length: 120 }).notNull(),
+    /** Stable lookup key. For a built-in role this is the workspace role itself. */
+    slug: varchar("slug", { length: 120 }).notNull(),
+    description: varchar("description", { length: 600 }),
+    /** The built-in role whose capabilities this row starts from. */
+    baseRole: mysqlEnum("baseRole", [
+      "platform_admin",
+      "owner",
+      "registered_manager",
+      "support_worker",
+      "hr_compliance",
+      "finance",
+      "read_only",
+    ]).notNull(),
+    isBuiltIn: int("isBuiltIn").default(0).notNull(),
+    /** Replaces the old users.role enum: grants the platform-level admin gate. */
+    isAdminAccount: int("isAdminAccount").default(0).notNull(),
+    /** Added on top of the base role. Limited to the managed capability list. */
+    grantedCapabilities: json("grantedCapabilities").$type<string[]>(),
+    /** Removed from the base role. Deny always wins, so this can only reduce access. */
+    deniedCapabilities: json("deniedCapabilities").$type<string[]>(),
+    /** Workspace paths this role sees; null falls back to the base role's built-in navigation. */
+    visiblePaths: json("visiblePaths").$type<string[]>(),
+    status: mysqlEnum("status", ["active", "archived"]).default("active").notNull(),
+    // Plain column, not a foreign key: users.roleId already points here, and a reference back
+    // would make the two tables circular, which TypeScript cannot infer through.
+    createdBy: int("createdBy"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  },
+  table => [
+    uniqueIndex("role_slug_uq").on(table.entityId, table.slug),
+    index("role_entity_idx").on(table.entityId, table.status),
+  ],
+);
+
+export type Role = typeof roles.$inferSelect;
+
 export const entityMemberships = mysqlTable(
   "entityMemberships",
   {
@@ -131,6 +179,8 @@ export const entityMemberships = mysqlTable(
     ]).notNull(),
     allProperties: int("allProperties").default(0).notNull(),
     extraCapabilities: json("extraCapabilities").$type<string[]>(),
+    /** Set when the member holds an admin-defined role; the columns above stay authoritative. */
+    roleId: int("roleId").references(() => roles.id),
     status: mysqlEnum("status", ["active", "suspended", "ended"]).default("active").notNull(),
     startsAt: bigint("startsAt", { mode: "number" }),
     endsAt: bigint("endsAt", { mode: "number" }),

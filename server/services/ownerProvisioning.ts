@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { builtInRoleId } from "./roleResolution";
 import { eq, inArray } from "drizzle-orm";
 import { entities, entityMemberships, users } from "../../drizzle/schema";
 import { getDb } from "../db";
@@ -41,8 +42,7 @@ export async function provisionLocalOwner(input: {
     name: input.name.trim(),
     email,
     loginMethod: "email",
-    role: "admin",
-    operationalRole: "owner",
+    roleId: await builtInRoleId("owner"),
     accountStatus: "active",
   }).$returningId();
 

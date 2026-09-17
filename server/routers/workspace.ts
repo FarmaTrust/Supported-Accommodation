@@ -5,6 +5,9 @@ import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
 import { automationRules, carePlans, complianceObligations, documents, invoices, notifications, placements, properties, propertyEvidence, recordShortcuts, savedViews, staffProfiles, workforceChecks, workPlanActions, workerAssignments, youngPeople } from "../../drizzle/schema";
 import { assertEntityCapability, getUserAccess, listAccessiblePropertyIds, roleHasCapability } from "../authz";
+import { cleanCapabilityList, cleanPathList, effectiveCapabilities, effectivePaths } from "../services/roleDefinitions";
+import { allCapabilities } from "../authz";
+import { visibleWorkspacePaths } from "../../client/src/lib/roleNavigation";
 import { createHeartbeatJob, updateHeartbeatJob } from "../_core/heartbeat";
 import { protectedProcedure, router } from "../_core/trpc";
 import { runAutomationEvaluation } from "../services/automation";
@@ -44,6 +47,26 @@ export const workspaceRouter = router({
     results.push(...documentRows.map(item => ({ type: "Document", id: item.id, title: item.title, subtitle: `${item.documentType} · ${item.status}`, path: "/documents" })));
     await writeAuditEvent({ actorUserId: ctx.user.id, entityId: input.entityId, action: "workspace.search", resourceType: "search", result: "success", metadata: { resultCount: results.length } });
     return results.slice(0, 50);
+  }),
+
+  /**
+   * The signed-in member's own navigation for one company. An admin-defined role may narrow the
+   * menu, so the sidebar asks the server rather than deriving everything from the workspace role.
+   */
+  myNavigation: protectedProcedure.input(z.object({ entityId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+    const { memberships } = await getUserAccess(ctx.user.id);
+    const membership = memberships.find(item => item.entityId === input.entityId);
+    if (!membership) return { paths: [] as string[], roleLabel: null as string | null, baseRole: null as string | null };
+    const baseRole = membership.operationalRole;
+    const role = membership.customRole;
+    if (!role) return { paths: visibleWorkspacePaths(baseRole), roleLabel: null, baseRole, capabilities: [] as string[] };
+    const definition = {
+      baseRole,
+      grantedCapabilities: cleanCapabilityList(role.grantedCapabilities, allCapabilities),
+      deniedCapabilities: cleanCapabilityList(role.deniedCapabilities, allCapabilities),
+      visiblePaths: cleanPathList(role.visiblePaths),
+    };
+    return { paths: effectivePaths(definition), roleLabel: role.name, baseRole, capabilities: effectiveCapabilities(definition) as string[] };
   }),
 
   notifications: protectedProcedure.query(async ({ ctx }) => {

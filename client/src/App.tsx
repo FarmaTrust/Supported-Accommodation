@@ -33,6 +33,7 @@ const ManagerAppPage = lazy(() => import("./pages/ManagerApp"));
 const KeyWorkerAppPage = lazy(() => import("./pages/KeyWorkerApp"));
 const KeyWorkerPage = lazy(() => import("./pages/KeyWorker"));
 const AccessControlPage = lazy(() => import("./pages/AccessControl"));
+const RoleManagementPage = lazy(() => import("./pages/RoleManagement"));
 const GuestInvitationPage = lazy(() => import("./pages/GuestInvitation"));
 const TemporaryLoginLinkPage = lazy(() => import("./pages/TemporaryLoginLink"));
 const SuperadminPage = lazy(() => import("./pages/Superadmin"));
@@ -58,6 +59,7 @@ function Router() {
           <Route path={"/nominated-individual"} component={NominatedIndividualAppPage} />
           <Route path={"/keyworker-app"} component={KeyWorkerAppPage} />
           <Route path={"/access-control"} component={AccessControlPage} />
+          <Route path={"/role-management"} component={RoleManagementPage} />
           <Route path={"/superadmin"} component={SuperadminPage} />
           <Route path={"/placements"} component={PlacementsPage} />
           <Route path={"/rota"} component={RotaPage} />

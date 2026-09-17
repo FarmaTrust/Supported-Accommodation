@@ -1,6 +1,7 @@
 import { and, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import {
+  roles,
   entityMemberships,
   entities,
   properties,
@@ -58,7 +59,7 @@ export type OperationalRole =
   | "finance"
   | "read_only";
 
-const allCapabilities: Capability[] = [
+export const allCapabilities: Capability[] = [
   "entity.read", "entity.write", "property.read", "property.write", "staff.read", "staff.write",
   "staff.sensitive", "young_person.read", "young_person.write", "shift.read", "shift.write",
   "compliance.read", "compliance.write", "document.read", "document.write", "incident.read",
@@ -97,7 +98,14 @@ export function roleHasCapability(role: OperationalRole, capability: Capability)
   return roleCapabilities[role]?.has(capability) ?? false;
 }
 
-export function entityCapabilityAllowed(role: OperationalRole, capability: Capability, extraCapabilities: string[] = []) { return roleHasCapability(role, capability) || extraCapabilities.includes(capability); }
+/**
+ * A denial always wins, so an admin-defined role can narrow a base role without any risk of
+ * widening it by accident. Grants are still bounded by the managed capability list at write time.
+ */
+export function entityCapabilityAllowed(role: OperationalRole, capability: Capability, extraCapabilities: string[] = [], deniedCapabilities: string[] = []) {
+  if (deniedCapabilities.includes(capability)) return false;
+  return roleHasCapability(role, capability) || extraCapabilities.includes(capability);
+}
 export function propertyScopeAllows(input: { role: OperationalRole; allProperties: boolean; assignedPropertyIds: number[]; propertyId: number }) { return input.role === "owner" || input.allProperties || input.assignedPropertyIds.includes(input.propertyId); }
 export function roleRequiresPlacementAssignment(role: OperationalRole) { return role === "support_worker"; }
 export function hasActivePlacementAssignment(assignments: Array<{ placementId: number; userId: number; startsAt: number | null; endsAt: number | null }>, placementId: number, userId: number, now = Date.now()) { return assignments.some(item => item.placementId === placementId && item.userId === userId && (item.startsAt === null || item.startsAt <= now) && (item.endsAt === null || item.endsAt > now)); }
@@ -107,17 +115,32 @@ async function writePermissionAudit(input: Parameters<typeof writeAuditEvent>[0]
   catch (error) { console.error("[Authorization] Permission audit write failed", { action: input.action, resourceType: input.resourceType, result: input.result, reasonCode: input.reasonCode, error }); }
 }
 
+function mergeStringLists(...lists: Array<unknown>) {
+  const merged = new Set<string>();
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) if (typeof item === "string") merged.add(item);
+  }
+  return Array.from(merged);
+}
+
 export async function getUserAccess(userId: number) {
   const db = await getDb();
   if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
-  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-  if (!user || user.accountStatus !== "active") {
+  const [row] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!row || row.accountStatus !== "active") {
     throw new TRPCError({ code: "FORBIDDEN", message: "Account is not active" });
   }
+  // users.roleId is the stored column; callers read the resolved workspace role.
+  const { resolveUserRole } = await import("./services/roleResolution");
+  const user = (await resolveUserRole(row))!;
   const now = Date.now();
-  const memberships = await db
-    .select()
+  // An admin-defined role is read live, so editing one applies to every holder immediately
+  // rather than needing each membership to be rewritten.
+  const rows = await db
+    .select({ membership: entityMemberships, customRole: roles })
     .from(entityMemberships)
+    .leftJoin(roles, and(eq(roles.id, entityMemberships.roleId), eq(roles.status, "active")))
     .where(
       and(
         eq(entityMemberships.userId, userId),
@@ -126,6 +149,13 @@ export async function getUserAccess(userId: number) {
         or(isNull(entityMemberships.endsAt), gt(entityMemberships.endsAt, now)),
       ),
     );
+  const memberships = rows.map(row => ({
+    ...row.membership,
+    customRole: row.customRole,
+    /** Managed grants from the membership and from its admin-defined role, merged. */
+    grantedCapabilities: mergeStringLists(row.membership.extraCapabilities, row.customRole?.grantedCapabilities),
+    deniedCapabilities: mergeStringLists(row.customRole?.deniedCapabilities),
+  }));
   return { user, memberships };
 }
 
@@ -144,13 +174,15 @@ export async function assertEntityCapability(userId: number, entityId: number, c
     throw new TRPCError({ code: "FORBIDDEN", message: "Entity access denied" });
   }
   const role = membership.operationalRole as OperationalRole;
-  const extras = Array.isArray(membership.extraCapabilities) ? membership.extraCapabilities : [];
-  if (!entityCapabilityAllowed(role, capability, extras)) {
-    await writePermissionAudit({ actorUserId: userId, entityId, action: "permission.entity", resourceType: "entity", resourceId: entityId, result: "denied", reasonCode: `role:${role}:${capability}` });
+  const extras = membership.grantedCapabilities;
+  const denied = membership.deniedCapabilities;
+  const roleLabel = membership.customRole ? `${membership.customRole.slug}(${role})` : role;
+  if (!entityCapabilityAllowed(role, capability, extras, denied)) {
+    await writePermissionAudit({ actorUserId: userId, entityId, action: "permission.entity", resourceType: "entity", resourceId: entityId, result: "denied", reasonCode: `role:${roleLabel}:${capability}` });
     throw new TRPCError({ code: "FORBIDDEN", message: "Action is outside your role" });
   }
-  await writePermissionAudit({ actorUserId: userId, entityId, action: "permission.entity", resourceType: "entity", resourceId: entityId, result: "allowed", reasonCode: `role:${role}:${capability}` });
-  return { role, allProperties: membership.allProperties === 1 };
+  await writePermissionAudit({ actorUserId: userId, entityId, action: "permission.entity", resourceType: "entity", resourceId: entityId, result: "allowed", reasonCode: `role:${roleLabel}:${capability}` });
+  return { role, allProperties: membership.allProperties === 1, customRole: membership.customRole };
 }
 
 export async function assertPropertyCapability(userId: number, entityId: number, propertyId: number, capability: Capability) {

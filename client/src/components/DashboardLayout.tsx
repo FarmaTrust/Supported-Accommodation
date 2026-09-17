@@ -29,6 +29,7 @@ const menuItems = [
   { icon: Building2, label: "Properties", path: "/properties" },
   { icon: UsersRound, label: "Workforce", path: "/workforce" },
   { icon: KeyRound, label: "Access control", path: "/access-control" },
+  { icon: ShieldCheck, label: "Roles & permissions", path: "/role-management" },
   { icon: LayoutDashboard, label: "RSM App", path: "/manager-app" },
   { icon: ShieldCheck, label: "Nominated Individual App", path: "/nominated-individual" },
   { icon: UserRound, label: "Staff workspace", path: "/staff" },
@@ -210,7 +211,12 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     if (!frontlinePaths.some(path => location === path || location.startsWith(`${path}/`))) setLocation("/keyworker-app");
   }, [location, setLocation, user?.operationalRole]);
   const matchesLocation = (path: string) => path === location || (path !== "/" && location.startsWith(`${path}/`));
-  const operationalMenuItems = menuItems.filter(item => canViewWorkspaceNavigation(user?.operationalRole, item.path)).sort((left, right) => {
+  // An admin-defined role may narrow the menu, so the server's answer wins once it arrives.
+  const navigation = trpc.workspace.myNavigation.useQuery({ entityId: entityId! }, { enabled: Boolean(entityId), staleTime: 60_000 });
+  const customPaths = navigation.data?.roleLabel ? navigation.data.paths : null;
+  const operationalMenuItems = menuItems.filter(item => customPaths
+    ? customPaths.includes(item.path)
+    : canViewWorkspaceNavigation(user?.operationalRole, item.path)).sort((left, right) => {
     if (user?.operationalRole !== "support_worker") return 0;
     const frontlineOrder: Record<string, number> = { "/keyworker-app": 0, "/properties": 1, "/care": 2, "/staff": 3 };
     return (frontlineOrder[left.path] ?? 99) - (frontlineOrder[right.path] ?? 99);

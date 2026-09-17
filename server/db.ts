@@ -18,7 +18,8 @@ export async function getDb() {
   return _db;
 }
 
-export async function upsertUser(user: InsertUser): Promise<void> {
+/** roleId is optional here: a first-time sign-in is given the default workspace role. */
+export async function upsertUser(user: Omit<InsertUser, "roleId"> & { roleId?: number }): Promise<void> {
   if (!user.openId) {
     throw new Error("User openId is required for upsert");
   }
@@ -30,7 +31,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
 
   try {
-    const values: InsertUser = {
+    const values: Partial<InsertUser> & { openId: string } = {
       openId: user.openId,
     };
     const updateSet: Record<string, unknown> = {};
@@ -52,14 +53,18 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       values.lastSignedIn = user.lastSignedIn;
       updateSet.lastSignedIn = user.lastSignedIn;
     }
-    if (user.role !== undefined) {
-      values.role = user.role;
-      updateSet.role = user.role;
+    if (user.roleId !== undefined) {
+      values.roleId = user.roleId;
+      updateSet.roleId = user.roleId;
     } else if (user.openId === ENV.ownerOpenId) {
-      values.role = 'admin';
-      updateSet.role = 'admin';
-      values.operationalRole = 'owner';
-      updateSet.operationalRole = 'owner';
+      const { builtInRoleId } = await import("./services/roleResolution");
+      const ownerRoleId = await builtInRoleId("owner");
+      values.roleId = ownerRoleId;
+      updateSet.roleId = ownerRoleId;
+    }
+    if (values.roleId === undefined) {
+      const { builtInRoleId } = await import("./services/roleResolution");
+      values.roleId = await builtInRoleId("support_worker");
     }
 
     if (!values.lastSignedIn) {
@@ -70,7 +75,7 @@ export async function upsertUser(user: InsertUser): Promise<void> {
       updateSet.lastSignedIn = new Date();
     }
 
-    await db.insert(users).values(values).onDuplicateKeyUpdate({
+    await db.insert(users).values(values as InsertUser).onDuplicateKeyUpdate({
       set: updateSet,
     });
   } catch (error) {
@@ -88,7 +93,8 @@ export async function getUserByOpenId(openId: string) {
 
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
 
-  return result.length > 0 ? result[0] : undefined;
+  const { resolveUserRole } = await import("./services/roleResolution");
+  return resolveUserRole(result[0]);
 }
 
 export async function getUserByEmail(email: string) {
@@ -96,7 +102,8 @@ export async function getUserByEmail(email: string) {
   if (!db) return undefined;
   const normalized = email.trim().toLowerCase();
   const result = await db.select().from(users).where(sql`LOWER(${users.email}) = ${normalized}`).limit(1);
-  return result[0];
+  const { resolveUserRole } = await import("./services/roleResolution");
+  return resolveUserRole(result[0]);
 }
 
 // TODO: add feature queries here as your schema grows.

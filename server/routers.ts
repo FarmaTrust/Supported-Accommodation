@@ -31,6 +31,7 @@ import { superadminRouter } from "./routers/superadmin";
 import { temporaryLoginLinksRouter } from "./routers/temporaryLoginLinks";
 import { nominatedIndividualRouter } from "./routers/nominatedIndividual";
 import { recordExportsRouter } from "./routers/recordExports";
+import { roleManagementRouter } from "./routers/roleManagement";
 import { requiresLocalPasswordChange } from "./services/localAuth";
 
 export const appRouter = router({
@@ -90,6 +91,7 @@ export const appRouter = router({
   superadmin: superadminRouter,
   nominatedIndividual: nominatedIndividualRouter,
   recordExports: recordExportsRouter,
+  roleManagement: roleManagementRouter,
 
   // TODO: add feature routers here, e.g.
   // todo: router({

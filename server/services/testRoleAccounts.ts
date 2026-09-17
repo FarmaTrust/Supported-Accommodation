@@ -3,17 +3,18 @@ import { entities, entityMemberships, localAuthCredentials, placements, properti
 import { getDb, getUserByEmail } from "../db";
 import { writeAuditEvent } from "./audit";
 import { createOrReplaceLocalCredential, normaliseLocalEmail } from "./localAuth";
+import { builtInRoleId, resolveUserRole } from "./roleResolution";
 
 const TEST_ENTITY_NAME = "TEST — Training Provider";
 const TEST_KEYWORKER_PROPERTY_ADDRESS = "30 Radford Road";
 
 export const testRoleAccounts = [
-  { key: "superadmin", name: "TEST Superadmin", email: "test.superadmin@training-provider.example.test", userRole: "admin" as const, operationalRole: "platform_admin" as const, membershipRole: "owner" as const, allProperties: true, extraCapabilities: [] as string[] },
-  { key: "owner", name: "TEST Owner", email: "test.owner@training-provider.example.test", userRole: "admin" as const, operationalRole: "owner" as const, membershipRole: "owner" as const, allProperties: true, extraCapabilities: [] as string[] },
-  { key: "manager", name: "TEST Manager", email: "test.manager@training-provider.example.test", userRole: "user" as const, operationalRole: "registered_manager" as const, membershipRole: "registered_manager" as const, allProperties: true, extraCapabilities: [] as string[] },
-  { key: "keyworker", name: "TEST Key Worker", email: "test.keyworker@training-provider.example.test", userRole: "user" as const, operationalRole: "support_worker" as const, membershipRole: "support_worker" as const, allProperties: false, extraCapabilities: [] as string[] },
-  { key: "finance", name: "TEST Finance User", email: "test.finance@training-provider.example.test", userRole: "user" as const, operationalRole: "finance" as const, membershipRole: "finance" as const, allProperties: true, extraCapabilities: ["compliance.read", "compliance.write"] },
-  { key: "guest", name: "Guest", email: "guest@training-provider.example.test", userRole: "user" as const, operationalRole: "read_only" as const, membershipRole: "read_only" as const, allProperties: true, extraCapabilities: [] as string[] },
+  { key: "superadmin", name: "TEST Superadmin", email: "test.superadmin@training-provider.example.test", operationalRole: "platform_admin" as const, membershipRole: "owner" as const, allProperties: true, extraCapabilities: [] as string[] },
+  { key: "owner", name: "TEST Owner", email: "test.owner@training-provider.example.test", operationalRole: "owner" as const, membershipRole: "owner" as const, allProperties: true, extraCapabilities: [] as string[] },
+  { key: "manager", name: "TEST Manager", email: "test.manager@training-provider.example.test", operationalRole: "registered_manager" as const, membershipRole: "registered_manager" as const, allProperties: true, extraCapabilities: [] as string[] },
+  { key: "keyworker", name: "TEST Key Worker", email: "test.keyworker@training-provider.example.test", operationalRole: "support_worker" as const, membershipRole: "support_worker" as const, allProperties: false, extraCapabilities: [] as string[] },
+  { key: "finance", name: "TEST Finance User", email: "test.finance@training-provider.example.test", operationalRole: "finance" as const, membershipRole: "finance" as const, allProperties: true, extraCapabilities: ["compliance.read", "compliance.write"] },
+  { key: "guest", name: "Guest", email: "guest@training-provider.example.test", operationalRole: "read_only" as const, membershipRole: "read_only" as const, allProperties: true, extraCapabilities: [] as string[] },
 ] as const;
 
 /** Existing fictional credentials are intentionally stable across scenario maintenance.
@@ -38,12 +39,13 @@ export async function provisionTestRoleAccounts(password: string | undefined, op
     let user = await getUserByEmail(email);
     let created = false;
     if (!user) {
-      const [result] = await db.insert(users).values({ openId: `local_test_${spec.key}`, name: spec.name, email, loginMethod: "email", role: spec.userRole, operationalRole: spec.operationalRole, accountStatus: "active" }).$returningId();
-      user = (await db.select().from(users).where(eq(users.id, result.id)).limit(1))[0]!;
+      const [result] = await db.insert(users).values({ openId: `local_test_${spec.key}`, name: spec.name, email, loginMethod: "email", roleId: await builtInRoleId(spec.operationalRole), accountStatus: "active" }).$returningId();
+      user = (await resolveUserRole((await db.select().from(users).where(eq(users.id, result.id)).limit(1))[0]))!;
       created = true;
     } else {
-      await db.update(users).set({ name: spec.name, email, loginMethod: "email", role: spec.userRole, operationalRole: spec.operationalRole, accountStatus: "active" }).where(eq(users.id, user.id));
+      await db.update(users).set({ name: spec.name, email, loginMethod: "email", roleId: await builtInRoleId(spec.operationalRole), accountStatus: "active" }).where(eq(users.id, user.id));
     }
+    if (!user) throw new Error(`Failed to provision the ${spec.key} test account.`);
     await db.insert(entityMemberships).values({ entityId: entity.id, userId: user.id, operationalRole: spec.membershipRole, allProperties: spec.allProperties ? 1 : 0, extraCapabilities: [...spec.extraCapabilities], status: "active" })
       .onDuplicateKeyUpdate({ set: { operationalRole: spec.membershipRole, allProperties: spec.allProperties ? 1 : 0, extraCapabilities: [...spec.extraCapabilities], status: "active", endsAt: null } });
     if (spec.key === "keyworker") {

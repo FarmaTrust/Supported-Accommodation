@@ -4,7 +4,7 @@ import axios, { type AxiosInstance } from "axios";
 import { parse as parseCookieHeader } from "cookie";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
-import type { User } from "../../drizzle/schema";
+import type { ResolvedUser } from "../services/roleResolution";
 import * as db from "../db";
 import { ENV } from "./env";
 import type {
@@ -358,7 +358,7 @@ class SDKServer {
 const CRON_OPEN_ID_PREFIX = "cron_";
 
 /** Result of `sdk.authenticateRequest`. Cron callbacks set `isCron=true` and `taskUid`; see `/home/ubuntu/skills/webdev-periodic-updates/SKILL.md`. */
-export type AuthenticatedUser = User & {
+export type AuthenticatedUser = ResolvedUser & {
   taskUid?: string;
   isCron?: boolean;
 };
@@ -373,7 +373,12 @@ function buildCronUser(
     name: userInfo.name || "Manus Scheduled Task",
     email: null,
     loginMethod: null,
+    roleId: 0,
+    operationalRole: "read_only",
     role: "user",
+    roleName: "Scheduled task",
+    roleSlug: "read_only",
+    isBuiltInRole: false,
     createdAt: now,
     updatedAt: now,
     lastSignedIn: now,
