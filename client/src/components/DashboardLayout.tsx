@@ -52,8 +52,9 @@ const menuItems = [
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { loading, user, authIssue, passwordChangeRequired, phoneCaptureRequired } = useAuth();
-  if (loading || !user) return <SignInScreen loading={loading} feedback={authIssue} />;
-  if (passwordChangeRequired) return <SignInScreen loading={false} feedback={null} forcePasswordChange />;
+  if (loading || !user) return <SignInScreen key="sign-in" loading={loading} feedback={authIssue} />;
+  // ponytail: distinct key remounts the screen so its mode state resets to force-change
+  if (passwordChangeRequired) return <SignInScreen key="force-change" loading={false} feedback={null} forcePasswordChange />;
   return <WorkspaceProvider><SidebarProvider><DashboardLayoutContent>{children}</DashboardLayoutContent><PhoneCaptureDialog required={phoneCaptureRequired} /></SidebarProvider></WorkspaceProvider>;
 }
 
