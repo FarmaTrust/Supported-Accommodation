@@ -27,6 +27,7 @@ final class RouterRegistrar
         Routers\GovernanceHubRouter::class,
         Routers\OperationsRouter::class,
         Routers\PlacementsRouter::class,
+        Routers\QualityRouter::class,
         Routers\RecordExportsRouter::class,
         Routers\RotaControlsRouter::class,
         Routers\SafeguardingRouter::class,
