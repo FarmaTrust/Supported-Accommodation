@@ -86,6 +86,37 @@ final class EvidenceStorage
         ];
     }
 
+    /**
+     * Stores bytes this application generated, rather than bytes somebody
+     * uploaded: an invoice or statement PDF. No size or type check applies,
+     * because the content came from here.
+     *
+     * @return array{key: string, url: string, sizeBytes: int, contentHash: string, fileName: string}
+     */
+    public static function putBytes(string $directory, string $fileName, string $mimeType, string $bytes): array
+    {
+        $safeName = (string) preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName);
+        $safeName = trim($safeName, '.') ?: 'document';
+
+        $key = sprintf(
+            '%s/%d-%s-%s',
+            trim($directory, '/'),
+            Dates::nowMillis(),
+            Str::lower(Str::random(8)),
+            $safeName,
+        );
+
+        Storage::disk(self::DISK)->put($key, $bytes);
+
+        return [
+            'key' => $key,
+            'url' => '/api/evidence/' . rawurlencode($key),
+            'sizeBytes' => strlen($bytes),
+            'contentHash' => hash('sha256', $bytes),
+            'fileName' => $safeName,
+        ];
+    }
+
     public static function exists(string $key): bool
     {
         return Storage::disk(self::DISK)->exists($key);
