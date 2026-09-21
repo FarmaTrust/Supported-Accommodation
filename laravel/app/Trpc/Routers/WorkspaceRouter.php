@@ -6,6 +6,7 @@ namespace App\Trpc\Routers;
 
 use App\Support\Audit;
 use App\Support\Authz;
+use App\Support\Automation;
 use App\Support\Dates;
 use App\Support\EvidenceReminders;
 use App\Support\RoleNavigation;
@@ -661,6 +662,27 @@ final class WorkspaceRouter
             ]);
 
             return ['id' => $ruleId, 'nextExecutionAt' => null];
+        });
+
+        $registry->mutation('workspace.runAutomationNow', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            Authz::assertEntityCapability($ctx->userId(), $entityId, 'compliance.write');
+
+            // Run in the request rather than queued. There is no worker on this
+            // deployment, and a button that silently queued work nobody would
+            // run would be worse than one that takes a moment.
+            $result = Automation::run($entityId);
+
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'action' => 'automation.manual_run',
+                'resourceType' => 'automation',
+                'result' => 'success',
+                'metadata' => $result,
+            ]);
+
+            return $result;
         });
     }
 

@@ -106,6 +106,18 @@ final class Rules
     }
 
     /** The obligation status that pairs with a rag colour. */
+    /** Where a deadline sits relative to now and its lead time. */
+    public static function classifyDeadline(int $dueAt, int $leadDays, ?int $nowMs = null): string
+    {
+        $now = $nowMs ?? Dates::nowMillis();
+
+        if ($dueAt < $now) {
+            return 'overdue';
+        }
+
+        return $dueAt <= $now + $leadDays * self::DAY_MS ? 'due' : 'not_due';
+    }
+
     public static function obligationStatusFor(string $ragStatus): string
     {
         return match ($ragStatus) {
