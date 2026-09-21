@@ -124,6 +124,11 @@ final class Validate
         return $number;
     }
 
+    public static function optionalInt(mixed $value, string $field, ?int $min = null, ?int $max = null): ?int
+    {
+        return $value === null ? null : self::int($value, $field, $min, $max);
+    }
+
     /** A row id: a positive integer. */
     public static function id(mixed $value, string $field = 'id'): int
     {

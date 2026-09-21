@@ -17,6 +17,7 @@ final class RouterRegistrar
     private const ROUTERS = [
         Routers\AccessControlRouter::class,
         Routers\AuthRouter::class,
+        Routers\CareRouter::class,
         Routers\ComplianceRouter::class,
         Routers\DashboardRouter::class,
         Routers\DocumentsRouter::class,
