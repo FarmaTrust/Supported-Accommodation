@@ -17,6 +17,7 @@ final class RouterRegistrar
     private const ROUTERS = [
         Routers\AuthRouter::class,
         Routers\EntitiesRouter::class,
+        Routers\StaffWorkspaceRouter::class,
     ];
 
     public static function build(): Registry
