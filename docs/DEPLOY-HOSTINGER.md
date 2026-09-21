@@ -39,7 +39,7 @@ with `JWT_SECRET`, so a cookie issued by either runtime is honoured by the other
     ├── index.html       Vite build output
     ├── assets/
     ├── .htaccess        from .deploy/public_html.htaccess
-    └── api-index.php    Laravel's public/index.php
+    └── api-index.php    from .deploy/api-index.php
 ```
 
 Only the front controller and the built client sit inside the document root.

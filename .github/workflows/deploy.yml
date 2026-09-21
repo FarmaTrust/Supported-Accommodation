@@ -58,7 +58,7 @@ jobs:
           mkdir -p upload/public_html upload/laravel
 
           cp -r dist/public/. upload/public_html/
-          cp laravel/public/index.php upload/public_html/api-index.php
+          cp .deploy/api-index.php upload/public_html/api-index.php
           cp .deploy/public_html.htaccess upload/public_html/.htaccess
 
           # Everything Laravel needs at runtime, and nothing it does not: no
