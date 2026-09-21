@@ -28,6 +28,7 @@ final class RouterRegistrar
         Routers\OperationsRouter::class,
         Routers\PlacementsRouter::class,
         Routers\RecordExportsRouter::class,
+        Routers\SafeguardingRouter::class,
         Routers\StaffWorkspaceRouter::class,
         Routers\WorkforceRouter::class,
         Routers\WorkspaceRouter::class,
