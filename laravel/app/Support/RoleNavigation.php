@@ -53,10 +53,14 @@ final class RoleNavigation
      * Keeps only capabilities this system actually knows about, so a stale or
      * hand-edited column cannot grant something unnamed.
      *
+     * @param array<int, string>|null $allowed a narrower list than every known
+     *        capability, for the columns that hold only grantable ones
      * @return array<int, string>
      */
-    public static function cleanCapabilityList(mixed $value): array
+    public static function cleanCapabilityList(mixed $value, ?array $allowed = null): array
     {
+        $allowed ??= Authz::ALL_CAPABILITIES;
+
         $value = is_string($value) ? json_decode($value, true) : $value;
         if (!is_array($value)) {
             return [];
@@ -64,7 +68,7 @@ final class RoleNavigation
 
         $clean = [];
         foreach ($value as $item) {
-            if (is_string($item) && in_array($item, Authz::ALL_CAPABILITIES, true) && !in_array($item, $clean, true)) {
+            if (is_string($item) && in_array($item, $allowed, true) && !in_array($item, $clean, true)) {
                 $clean[] = $item;
             }
         }

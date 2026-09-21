@@ -31,6 +31,7 @@ final class RouterRegistrar
         Routers\PlacementsRouter::class,
         Routers\QualityRouter::class,
         Routers\RecordExportsRouter::class,
+        Routers\RoleManagementRouter::class,
         Routers\RotaControlsRouter::class,
         Routers\SafeguardingRouter::class,
         Routers\StaffWorkspaceRouter::class,
