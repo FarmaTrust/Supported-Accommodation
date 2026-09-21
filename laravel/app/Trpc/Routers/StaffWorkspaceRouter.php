@@ -53,6 +53,38 @@ final class StaffWorkspaceRouter
         'triaged', 'assigned', 'scheduled', 'in_progress', 'completed', 'verified', 'cancelled', 'reopened',
     ];
 
+    private const NOTE_TYPES = [
+        'observation', 'contact', 'appointment', 'achievement', 'concern',
+        'activity', 'education', 'health', 'other',
+    ];
+
+    private const REPORT_SOURCE_TYPES = [
+        'keywork_session', 'daily_note', 'support_goal', 'appointment',
+        'incident', 'curfew_check', 'medication', 'finance',
+    ];
+
+    private const INCIDENT_PERSON_TYPES = [
+        'young_person', 'staff', 'professional', 'visitor', 'public', 'other',
+    ];
+
+    private const INCIDENT_INVOLVEMENTS = [
+        'affected', 'witness', 'reporter', 'person_of_concern', 'responding_professional', 'other',
+    ];
+
+    private const REFERENCE_TYPES = [
+        'police', 'nhs', 'local_authority', 'ofsted', 'lado', 'insurance', 'other',
+    ];
+
+    private const CONCERN_TYPES = [
+        'disclosure', 'observation', 'exploitation', 'abuse', 'neglect',
+        'self_harm', 'online_safety', 'criminality', 'other',
+    ];
+
+    private const INVESTIGATION_TYPES = [
+        'safeguarding', 'complaint', 'incident', 'staff_conduct', 'finance',
+        'medication', 'property', 'other',
+    ];
+
     public static function register(Registry $registry): void
     {
         $registry->query('staffWorkspace.context', Registry::USER, static function (Context $ctx, mixed $input): array {
@@ -791,6 +823,371 @@ final class StaffWorkspaceRouter
             ]);
 
             return ['id' => $sessionId];
+        });
+
+        $registry->mutation('staffWorkspace.createDailyNote', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $propertyId = Validate::id($input['propertyId'] ?? null, 'propertyId');
+            $placementId = Validate::id($input['placementId'] ?? null, 'placementId');
+            WorkspaceGuards::assertPlacementScope($ctx->userId(), $entityId, $propertyId, $placementId, 'young_person.write');
+
+            $tags = isset($input['tags']) ? Validate::arrayOf($input['tags'], 'tags', 20) : null;
+            if ($tags !== null) {
+                foreach ($tags as $index => $tag) {
+                    Validate::string($tag, "tags.$index", 1, 50);
+                }
+            }
+
+            $noteId = (int) DB::table('dailyNotes')->insertGetId([
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'placementId' => $placementId,
+                'shiftId' => Validate::optionalId($input['shiftId'] ?? null, 'shiftId'),
+                'noteType' => Validate::enum($input['noteType'] ?? null, self::NOTE_TYPES, 'noteType'),
+                'observedAt' => Validate::int($input['observedAt'] ?? null, 'observedAt'),
+                'contentCiphertext' => EncryptedFields::seal(Validate::string($input['content'] ?? null, 'content', 5, 10000)),
+                'youngPersonViewCiphertext' => EncryptedFields::seal(Validate::optionalString($input['youngPersonView'] ?? null, 'youngPersonView', 5000)),
+                'tags' => $tags === null ? null : json_encode($tags, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'status' => Validate::enum($input['status'] ?? 'submitted', ['draft', 'submitted'], 'status'),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $noteId];
+        });
+
+        $registry->mutation('staffWorkspace.reviewReport', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $reportId = Validate::id($input['reportId'] ?? null, 'reportId');
+            $decision = Validate::enum($input['decision'] ?? null, ['reviewed', 'returned', 'approved', 'locked'], 'decision');
+            $expectedVersion = Validate::int($input['expectedVersion'] ?? null, 'expectedVersion', 1);
+            $notes = Validate::optionalString($input['notes'] ?? null, 'notes', 5000);
+
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $row = DB::table('keyWorkerReports')->where('id', $reportId)->where('entityId', $entityId)->first();
+            if ($row === null) {
+                throw TrpcException::notFound('Report not found');
+            }
+
+            // Sending work back without saying why leaves the author guessing,
+            // so a return has to carry a reason.
+            if ($decision === 'returned' && strlen(trim((string) $notes)) < 10) {
+                throw WorkspacePolicy::fieldError(
+                    'return_reason_required', 'notes',
+                    'Add a clear return reason of at least 10 characters.',
+                );
+            }
+
+            WorkspacePolicy::assertIndependentReviewer($row->authorUserId === null ? null : (int) $row->authorUserId, $ctx->userId());
+            WorkspacePolicy::assertExpectedVersion((int) $row->version, $expectedVersion);
+            WorkspacePolicy::assertTransition('report', (string) $row->status, $decision);
+
+            $now = Dates::nowMillis();
+
+            DB::transaction(static function () use ($ctx, $entityId, $row, $decision, $notes, $now): void {
+                DB::table('keyWorkerReports')->where('id', $row->id)->update([
+                    'status' => $decision,
+                    'reviewNotesCiphertext' => EncryptedFields::seal($notes),
+                    'reviewedBy' => $ctx->userId(),
+                    'reviewedAt' => $now,
+                    'approvedBy' => $decision === 'approved' ? $ctx->userId() : $row->approvedBy,
+                    'approvedAt' => $decision === 'approved' ? $now : $row->approvedAt,
+                    'lockedBy' => $decision === 'locked' ? $ctx->userId() : $row->lockedBy,
+                    'lockedAt' => $decision === 'locked' ? $now : $row->lockedAt,
+                    'version' => (int) $row->version + 1,
+                ]);
+
+                // Each decision is kept as its own row, so a report shows the
+                // whole review history rather than only its current state.
+                DB::table('keyWorkerReportReviews')->insert([
+                    'entityId' => $entityId,
+                    'reportId' => (int) $row->id,
+                    'decision' => $decision,
+                    'notesCiphertext' => EncryptedFields::seal($notes),
+                    'createdBy' => $ctx->userId(),
+                ]);
+            });
+
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'propertyId' => $row->propertyId === null ? null : (int) $row->propertyId,
+                'action' => "keywork.report.$decision",
+                'resourceType' => 'key_worker_report',
+                'resourceId' => (int) $row->id,
+                'sensitivity' => 'safeguarding',
+                'result' => 'success',
+                'metadata' => ['fromStatus' => $row->status, 'version' => (int) $row->version + 1],
+            ]);
+
+            return ['success' => true];
+        });
+
+        $registry->mutation('staffWorkspace.linkReportSource', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $reportId = Validate::id($input['reportId'] ?? null, 'reportId');
+            $sourceType = Validate::enum($input['sourceType'] ?? null, self::REPORT_SOURCE_TYPES, 'sourceType');
+            $sourceId = Validate::string($input['sourceId'] ?? null, 'sourceId', 1, 80);
+            $linkReason = Validate::enum($input['linkReason'] ?? 'included', ['included', 'summarised', 'follow_up', 'evidence'], 'linkReason');
+
+            $report = DB::table('keyWorkerReports')->where('id', $reportId)->where('entityId', $entityId)->first();
+            if ($report === null) {
+                throw TrpcException::notFound('Report not found');
+            }
+
+            Authz::assertCurrentShiftPlacementCapability($ctx->userId(), (int) $report->placementId, 'young_person.write');
+
+            // Once a report has been submitted its evidence is fixed. Changing
+            // what it drew on afterwards goes through a correction addendum, so
+            // the record a reviewer saw stays the record that was reviewed.
+            if (!in_array($report->status, ['draft', 'returned'], true)) {
+                throw WorkspacePolicy::fieldError(
+                    'correction_required', 'status',
+                    'Submitted report sources can only be changed through an approved correction addendum.',
+                    'CONFLICT',
+                );
+            }
+
+            $id = (int) DB::table('keyWorkerReportSources')->insertGetId([
+                'entityId' => $entityId,
+                'reportId' => $reportId,
+                'sourceType' => $sourceType,
+                'sourceId' => $sourceId,
+                'linkReason' => $linkReason,
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.addIncidentPerson', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $incidentId = Validate::id($input['incidentId'] ?? null, 'incidentId');
+
+            $incident = DB::table('incidents')->where('id', $incidentId)->where('entityId', $entityId)->first();
+            if ($incident === null) {
+                throw TrpcException::notFound('Incident not found');
+            }
+
+            Authz::assertCurrentShiftPropertyCapability($ctx->userId(), $entityId, (int) $incident->propertyId, 'incident.write');
+
+            if (!in_array($incident->managerReviewState, ['pending', 'returned'], true)) {
+                throw WorkspacePolicy::fieldError(
+                    'correction_required', 'managerReviewState',
+                    'Incident details can only be changed through an approved correction after Manager review starts.',
+                    'CONFLICT',
+                );
+            }
+
+            $id = (int) DB::table('incidentPeople')->insertGetId([
+                'entityId' => $entityId,
+                'incidentId' => $incidentId,
+                'personType' => Validate::enum($input['personType'] ?? null, self::INCIDENT_PERSON_TYPES, 'personType'),
+                'placementId' => Validate::optionalId($input['placementId'] ?? null, 'placementId'),
+                'userId' => Validate::optionalId($input['userId'] ?? null, 'userId'),
+                // Someone named in an incident may be a member of the public, so
+                // their name and contact details are held encrypted.
+                'nameCiphertext' => EncryptedFields::seal(Validate::optionalString($input['name'] ?? null, 'name', 180)),
+                'contactCiphertext' => EncryptedFields::seal(Validate::optionalString($input['contact'] ?? null, 'contact', 320)),
+                'roleDescription' => Validate::optionalString($input['roleDescription'] ?? null, 'roleDescription', 180),
+                'involvement' => Validate::enum($input['involvement'] ?? null, self::INCIDENT_INVOLVEMENTS, 'involvement'),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.addIncidentReference', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $incidentId = Validate::id($input['incidentId'] ?? null, 'incidentId');
+
+            $incident = DB::table('incidents')->where('id', $incidentId)->where('entityId', $entityId)->first();
+            if ($incident === null) {
+                throw TrpcException::notFound('Incident not found');
+            }
+
+            Authz::assertCurrentShiftPropertyCapability($ctx->userId(), $entityId, (int) $incident->propertyId, 'incident.write');
+
+            $id = (int) DB::table('incidentReferences')->insertGetId([
+                'entityId' => $entityId,
+                'incidentId' => $incidentId,
+                'referenceType' => Validate::enum($input['referenceType'] ?? null, self::REFERENCE_TYPES, 'referenceType'),
+                // A police or LADO reference identifies a case about a person, so
+                // the value itself is encrypted rather than only the notes.
+                'referenceValueCiphertext' => EncryptedFields::seal(Validate::string($input['referenceValue'] ?? null, 'referenceValue', 1, 400)),
+                'organisation' => Validate::optionalString($input['organisation'] ?? null, 'organisation', 220),
+                'notesCiphertext' => EncryptedFields::seal(Validate::optionalString($input['notes'] ?? null, 'notes', 3000)),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.reviewIncident', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $incidentId = Validate::id($input['incidentId'] ?? null, 'incidentId');
+            $decision = Validate::enum($input['decision'] ?? null, ['started', 'returned', 'approved', 'follow_up', 'closed'], 'decision');
+            $assessment = Validate::enum(
+                $input['notificationAssessment'] ?? 'unchanged',
+                ['unchanged', 'not_notifiable', 'regulation_27', 'other_notification'],
+                'notificationAssessment',
+            );
+            $expectedVersion = Validate::int($input['expectedVersion'] ?? null, 'expectedVersion', 1);
+            $notes = Validate::optionalString($input['notes'] ?? null, 'notes', 5000);
+
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $row = DB::table('incidents')->where('id', $incidentId)->where('entityId', $entityId)->first();
+            if ($row === null) {
+                throw TrpcException::notFound('Incident not found');
+            }
+
+            WorkspacePolicy::assertIndependentReviewer($row->createdBy === null ? null : (int) $row->createdBy, $ctx->userId());
+            WorkspacePolicy::assertExpectedVersion((int) $row->version, $expectedVersion);
+
+            // Starting a review and recording a follow-up both leave the incident
+            // in review; the distinction is kept on the review row.
+            $mapped = in_array($decision, ['started', 'follow_up'], true) ? 'in_review' : $decision;
+            WorkspacePolicy::assertTransition('incident', (string) $row->managerReviewState, $mapped);
+
+            DB::transaction(static function () use ($ctx, $entityId, $row, $decision, $mapped, $assessment, $notes): void {
+                DB::table('incidents')->where('id', $row->id)->update([
+                    'managerReviewState' => $mapped,
+                    'managerReviewNotesCiphertext' => EncryptedFields::seal($notes),
+                    'reviewedBy' => $ctx->userId(),
+                    'reviewedAt' => Dates::nowMillis(),
+                    // Whether the incident is notifiable to the regulator is only
+                    // changed when the reviewer actually reassesses it.
+                    'notifiability' => $assessment === 'unchanged' ? $row->notifiability : $assessment,
+                    'version' => (int) $row->version + 1,
+                ]);
+
+                DB::table('incidentReviews')->insert([
+                    'entityId' => $entityId,
+                    'incidentId' => (int) $row->id,
+                    'decision' => $decision,
+                    'notesCiphertext' => EncryptedFields::seal($notes),
+                    'notificationAssessment' => $assessment,
+                    'createdBy' => $ctx->userId(),
+                ]);
+            });
+
+            return ['success' => true];
+        });
+
+        $registry->mutation('staffWorkspace.createSafeguardingConcern', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $propertyId = Validate::id($input['propertyId'] ?? null, 'propertyId');
+            $placementId = Validate::id($input['placementId'] ?? null, 'placementId');
+
+            WorkspaceGuards::assertPlacementScope($ctx->userId(), $entityId, $propertyId, $placementId, 'incident.write');
+            WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, 'safeguarding', 'write', $placementId);
+
+            $riskLevel = Validate::enum($input['riskLevel'] ?? null, ['low', 'medium', 'high', 'critical'], 'riskLevel');
+
+            $concernId = (int) DB::table('safeguardingConcerns')->insertGetId([
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'placementId' => $placementId,
+                'incidentId' => Validate::optionalId($input['incidentId'] ?? null, 'incidentId'),
+                'complaintId' => Validate::optionalId($input['complaintId'] ?? null, 'complaintId'),
+                'allegationId' => Validate::optionalId($input['allegationId'] ?? null, 'allegationId'),
+                'concernType' => Validate::enum($input['concernType'] ?? null, self::CONCERN_TYPES, 'concernType'),
+                'riskLevel' => $riskLevel,
+                'summaryCiphertext' => EncryptedFields::seal(Validate::string($input['summary'] ?? null, 'summary', 10, 12000)),
+                // What was done to keep the young person safe right away is
+                // required, not optional: a concern with no protective action is
+                // an incomplete record.
+                'immediateProtectionCiphertext' => EncryptedFields::seal(Validate::string($input['immediateProtection'] ?? null, 'immediateProtection', 5, 8000)),
+                'youngPersonViewCiphertext' => EncryptedFields::seal(Validate::optionalString($input['youngPersonView'] ?? null, 'youngPersonView', 8000)),
+                'reviewDueAt' => isset($input['reviewDueAt']) ? Validate::int($input['reviewDueAt'], 'reviewDueAt') : null,
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            StaffWorkspaceSupport::notifyManagers(
+                $entityId, $propertyId, 'safeguarding_concern', $concernId,
+                'Safeguarding concern', in_array($riskLevel, ['high', 'critical'], true), '/app/manager/inbox',
+            );
+
+            return ['id' => $concernId];
+        });
+
+        $registry->mutation('staffWorkspace.createInvestigation', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $leadUserId = Validate::id($input['leadUserId'] ?? null, 'leadUserId');
+            $independentReviewerUserId = Validate::optionalId($input['independentReviewerUserId'] ?? null, 'independentReviewerUserId');
+
+            // The point of an independent reviewer is that they are not the
+            // person running the investigation.
+            if ($independentReviewerUserId !== null && $leadUserId === $independentReviewerUserId) {
+                throw TrpcException::badRequest('Lead and independent reviewer must be different people');
+            }
+
+            $id = (int) DB::table('investigations')->insertGetId([
+                'entityId' => $entityId,
+                'propertyId' => Validate::optionalId($input['propertyId'] ?? null, 'propertyId'),
+                'placementId' => Validate::optionalId($input['placementId'] ?? null, 'placementId'),
+                'concernId' => Validate::optionalId($input['concernId'] ?? null, 'concernId'),
+                'incidentId' => Validate::optionalId($input['incidentId'] ?? null, 'incidentId'),
+                'complaintId' => Validate::optionalId($input['complaintId'] ?? null, 'complaintId'),
+                'allegationId' => Validate::optionalId($input['allegationId'] ?? null, 'allegationId'),
+                'investigationType' => Validate::enum($input['investigationType'] ?? null, self::INVESTIGATION_TYPES, 'investigationType'),
+                'termsCiphertext' => EncryptedFields::seal(Validate::string($input['terms'] ?? null, 'terms', 10, 10000)),
+                'leadUserId' => $leadUserId,
+                'independentReviewerUserId' => $independentReviewerUserId,
+                'dueAt' => isset($input['dueAt']) ? Validate::int($input['dueAt'], 'dueAt') : null,
+                'openedAt' => Dates::nowMillis(),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.transitionInvestigation', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $investigationId = Validate::id($input['investigationId'] ?? null, 'investigationId');
+            $nextStatus = Validate::enum(
+                $input['nextStatus'] ?? null,
+                ['evidence_gathering', 'awaiting_response', 'review', 'action_plan', 'closed', 'cancelled'],
+                'nextStatus',
+            );
+            $expectedVersion = Validate::int($input['expectedVersion'] ?? null, 'expectedVersion', 1);
+            $outcome = Validate::optionalString($input['outcome'] ?? null, 'outcome', 10000);
+            $learning = Validate::optionalString($input['learning'] ?? null, 'learning', 10000);
+
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $row = DB::table('investigations')->where('id', $investigationId)->where('entityId', $entityId)->first();
+            if ($row === null) {
+                throw TrpcException::notFound('Investigation not found');
+            }
+
+            WorkspacePolicy::assertExpectedVersion((int) $row->version, $expectedVersion);
+            WorkspacePolicy::assertTransition('investigation', (string) $row->status, $nextStatus);
+
+            // Closing an investigation needs a recorded outcome, and the person
+            // closing it cannot be the one who led it.
+            if ($nextStatus === 'closed') {
+                if ($outcome === null) {
+                    throw TrpcException::badRequest('An outcome is required before closure');
+                }
+                WorkspacePolicy::assertIndependentReviewer($row->leadUserId === null ? null : (int) $row->leadUserId, $ctx->userId());
+            }
+
+            $now = Dates::nowMillis();
+
+            DB::table('investigations')->where('id', $row->id)->update([
+                'status' => $nextStatus,
+                'outcomeCiphertext' => $outcome === null ? $row->outcomeCiphertext : EncryptedFields::seal($outcome),
+                'learningCiphertext' => $learning === null ? $row->learningCiphertext : EncryptedFields::seal($learning),
+                'closedAt' => $nextStatus === 'closed' ? $now : $row->closedAt,
+                'closedBy' => $nextStatus === 'closed' ? $ctx->userId() : $row->closedBy,
+                'version' => (int) $row->version + 1,
+            ]);
+
+            return ['success' => true];
         });
     }
 
