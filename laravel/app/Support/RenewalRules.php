@@ -40,6 +40,30 @@ final class RenewalRules
     public const ACTIONABLE_BANDS = ['overdue', 'one_month', 'two_months', 'three_months'];
 
     /**
+     * The folder tree the certificate library is set up with, so every company
+     * files the same kind of certificate in the same place.
+     *
+     * @var array<int, string>
+     */
+    public const CERTIFICATE_LIBRARY_FOLDERS = [
+        'Property — HMO licences',
+        'Property — Gas safety',
+        'Property — Electrical safety',
+        'Property — Fire safety',
+        'Property — Insurance',
+        'Property — Ofsted',
+        'Property — Other legal certificates',
+        'Staff — DBS and Right to Work',
+        'Staff — Safeguarding',
+        'Staff — First aid',
+        'Staff — Medication',
+        'Staff — Fire safety',
+        'Staff — Food hygiene',
+        'Staff — Manual handling',
+        'Staff — Other training',
+    ];
+
+    /**
      * @return array{band: string, daysRemaining: int|null, ragStatus: string, label: string, severity: string}
      */
     public static function band(?int $dueAt, ?int $nowMs = null): array
