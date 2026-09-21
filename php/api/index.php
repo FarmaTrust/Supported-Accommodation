@@ -27,7 +27,8 @@ use Hub\Routers\AuthRouter;
 use Hub\Superjson;
 use Hub\Trpc;
 
-Env::load(getenv('HUB_ENV_FILE') ?: dirname(__DIR__, 2) . '/.env');
+$envFile = getenv('HUB_ENV_FILE') ?: dirname(__DIR__, 2) . '/.env';
+Env::load($envFile);
 
 // Errors go to the log, never to the response: a PHP notice printed before the
 // JSON body would make every tRPC reply unparseable, and a stack trace would
@@ -46,6 +47,23 @@ if (!str_starts_with($requestPath, $prefix)) {
     http_response_code(404);
     echo json_encode(['error' => ['message' => 'Not found']]);
     exit;
+}
+
+// A missing configuration file and a failing database both surface as an
+// unhandled exception, which makes them indistinguishable from outside. This
+// check separates them without naming a path: "not configured" is a deployment
+// mistake, anything else is a runtime fault.
+foreach (['TIDB_DATABASE_URL', 'JWT_SECRET'] as $required) {
+    if (Env::get($required) === null || Env::get($required) === '') {
+        error_log("[api] $required is not set. Expected an environment file at $envFile");
+        http_response_code(503);
+        echo json_encode(['error' => Superjson::encode([
+            'message' => 'The server is not configured yet.',
+            'code' => -32603,
+            'data' => ['code' => 'INTERNAL_SERVER_ERROR', 'httpStatus' => 503, 'path' => ''],
+        ])], JSON_UNESCAPED_SLASHES);
+        exit;
+    }
 }
 
 $trpc = new Trpc();
