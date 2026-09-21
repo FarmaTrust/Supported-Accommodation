@@ -19,6 +19,7 @@ final class RouterRegistrar
         Routers\ComplianceRouter::class,
         Routers\DocumentsRouter::class,
         Routers\EntitiesRouter::class,
+        Routers\GovernanceHubRouter::class,
         Routers\PlacementsRouter::class,
         Routers\StaffWorkspaceRouter::class,
         Routers\WorkforceRouter::class,
