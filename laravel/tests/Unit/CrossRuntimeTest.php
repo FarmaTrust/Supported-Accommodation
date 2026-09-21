@@ -18,7 +18,7 @@ use stdClass;
 /**
  * The three formats that must stay byte-identical to the Node runtime.
  *
- * The fixture is generated from the Node sources by php/tests/make-fixture.ts,
+ * The fixture is generated from the Node sources by laravel/tests/fixtures/make-fixture.ts,
  * including the audit hashes, which come from the production
  * buildAuditEnvelope. If either side drifts, these fail rather than the audit
  * chain quietly forking in production.
@@ -28,9 +28,9 @@ final class CrossRuntimeTest extends TestCase
     /** @return array<string, mixed> */
     private function fixture(): array
     {
-        $path = dirname(__DIR__, 3) . '/php/tests/fixture.json';
+        $path = dirname(__DIR__) . '/fixtures/node-fixture.json';
         if (!is_file($path)) {
-            $this->markTestSkipped("No fixture at $path. Run: npx tsx php/tests/make-fixture.ts > php/tests/fixture.json");
+            $this->markTestSkipped("No fixture at $path. Run: npx tsx laravel/tests/fixtures/make-fixture.ts > laravel/tests/fixtures/node-fixture.json");
         }
 
         return json_decode((string) file_get_contents($path), true, 512, JSON_THROW_ON_ERROR);

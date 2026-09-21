@@ -4,14 +4,14 @@
  * The audit envelope is built by importing the production function, so a change
  * to the hashed shape fails the PHP tests instead of silently forking the chain.
  *
- * Usage: npx tsx php/tests/make-fixture.ts > php/tests/fixture.json
+ * Usage: npx tsx laravel/tests/fixtures/make-fixture.ts > laravel/tests/fixtures/node-fixture.json
  */
 import { SignJWT } from "jose";
 import superjson from "superjson";
-import { buildAuditEnvelope } from "../../server/services/audit";
-import { allCapabilities, roleCapabilities } from "../../server/authz";
-import { encryptSensitive } from "../../server/services/crypto";
-import { assertWorkspaceTransition } from "../../server/services/staffWorkspacePolicy";
+import { buildAuditEnvelope } from "../../../server/services/audit";
+import { allCapabilities, roleCapabilities } from "../../../server/authz";
+import { encryptSensitive } from "../../../server/services/crypto";
+import { assertWorkspaceTransition } from "../../../server/services/staffWorkspacePolicy";
 
 // Never the real JWT_SECRET: this fixture is committed, so it carries a dummy
 // secret and the encryption sample is produced with the same one.

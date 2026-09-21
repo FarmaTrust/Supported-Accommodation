@@ -20,35 +20,51 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check the PHP API
-        uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.2"
-          extensions: pdo_mysql, mbstring, sodium
+          php-version: "8.3"
+          extensions: pdo_mysql, mbstring, sodium, intl
+          tools: composer
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          composer install --working-dir=laravel --no-dev --optimize-autoloader --no-interaction
 
       # The fixture is regenerated from the Node sources on every run, so a
-      # change to the session, superjson or audit-hash format fails here rather
-      # than silently forking the audit chain in production.
-      - run: npx tsx php/tests/make-fixture.ts > php/tests/fixture.json
-      - run: php -l php/api/index.php && find php/api/src -name '*.php' -exec php -l {} \;
-      - run: php php/tests/run.php
+      # change to the session, superjson, audit-hash, capability or workflow
+      # format fails here rather than drifting apart in production.
+      - name: Regenerate the cross-runtime fixture
+        run: npx tsx laravel/tests/fixtures/make-fixture.ts > laravel/tests/fixtures/node-fixture.json
+        env:
+          JWT_SECRET: test-secret-value-1234567890
+
+      - name: Check the API
+        run: |
+          find laravel/app laravel/routes -name '*.php' -exec php -l {} \;
+          php laravel/vendor/bin/phpunit --configuration laravel/phpunit.xml
 
       - name: Build the client
         run: npm run build
 
-      # public_html gets the built SPA, the rewrite rules and the PHP API.
-      # dist/index.js is the Node server bundle and is deliberately left behind:
-      # shared hosting cannot run it.
+      # public_html gets the built SPA, the rewrite rules and Laravel's public
+      # entry point; the framework itself sits above the document root.
       - name: Assemble the upload
         run: |
           set -euo pipefail
-          mkdir -p upload
-          cp -r dist/public/. upload/
-          cp php/public/.htaccess upload/.htaccess
-          cp -r php/api upload/api
+          mkdir -p upload/public_html upload/laravel
+
+          cp -r dist/public/. upload/public_html/
+          cp laravel/public/index.php upload/public_html/api-index.php
+          cp .deploy/public_html.htaccess upload/public_html/.htaccess
+
+          # Everything Laravel needs at runtime, and nothing it does not: no
+          # tests, no fixtures, no local environment file.
+          for path in app bootstrap config routes storage vendor artisan composer.json composer.lock; do
+            cp -r "laravel/$path" upload/laravel/
+          done
+          rm -rf upload/laravel/storage/logs/*.log
+
           find upload -name '.DS_Store' -delete
           echo "--- upload tree ---"
           find upload -maxdepth 2 | sort
@@ -62,10 +78,11 @@ jobs:
           protocol: ftps
           local-dir: ./upload/
           server-dir: ${{ secrets.FTP_REMOTE_DIR }}
-          # .env lives one level above the document root and is never in the
-          # upload, so it must never be deleted from the server either.
+          # .env and uploaded evidence live on the server and are never in the
+          # upload, so they must never be deleted from it either.
           exclude: |
             **/.git*
             **/.git*/**
             **/node_modules/**
             .env
+            laravel/storage/app/**
