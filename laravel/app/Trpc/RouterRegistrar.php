@@ -30,6 +30,8 @@ final class RouterRegistrar
         Routers\GovernanceHubRouter::class,
         Routers\GuestInvitationsRouter::class,
         Routers\KeyworkRouter::class,
+        Routers\NominatedIndividualRouter::class,
+        Routers\OfflineSyncRouter::class,
         Routers\OperationsRouter::class,
         Routers\PlacementsRouter::class,
         Routers\QualityRouter::class,
@@ -39,6 +41,8 @@ final class RouterRegistrar
         Routers\RotaControlsRouter::class,
         Routers\SafeguardingRouter::class,
         Routers\StaffWorkspaceRouter::class,
+        Routers\SuperadminRouter::class,
+        Routers\TemporaryLoginLinksRouter::class,
         Routers\WorkforceRouter::class,
         Routers\WorkspaceRouter::class,
     ];
