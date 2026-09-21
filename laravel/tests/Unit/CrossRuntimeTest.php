@@ -16,12 +16,17 @@ use RuntimeException;
 use stdClass;
 
 /**
- * The three formats that must stay byte-identical to the Node runtime.
+ * The three formats that had to stay byte-identical to the Node runtime.
  *
- * The fixture is generated from the Node sources by laravel/tests/fixtures/make-fixture.ts,
- * including the audit hashes, which come from the production
- * buildAuditEnvelope. If either side drifts, these fail rather than the audit
- * chain quietly forking in production.
+ * node-fixture.json was captured from the Node sources while they still
+ * existed, audit hashes included, from the production buildAuditEnvelope. The
+ * generator went with the Node server; the fixture stays as a frozen reference.
+ *
+ * It still earns its place. The session cookies, the encrypted columns and
+ * above all the audit chain in the production database were written by that
+ * runtime, and this runtime has to keep reading and extending them. These fail
+ * if PHP ever drifts from the format those rows are in, rather than the chain
+ * quietly forking from the day of the cutover.
  */
 final class CrossRuntimeTest extends TestCase
 {

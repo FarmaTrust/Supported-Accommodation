@@ -6,27 +6,30 @@ Supported Accommodation Hub is a multi-tenant operations platform for supported-
 
 ## Architecture at a Glance
 
-The application runs as one Node.js service in development and production. The server hosts the Express API, the tRPC router at `/api/trpc`, local authentication endpoints, scheduled endpoints and—depending on mode—the Vite development middleware or built React client assets.
+The application is two pieces: a React client built by Vite, and a Laravel API. The API implements the tRPC wire protocol at `/api/trpc` rather than a REST shape of its own, so the client's `useQuery`/`useMutation` call sites are the same ones they always were.
+
+There was a Node/Express server in `server/` until the port to Laravel finished. It is gone; `git log` has it. The `mirroring server/...` notes in the PHP docblocks name the file each behaviour came from, and those paths resolve against the commit before the removal.
 
 | Layer | Technology | Main locations |
 |---|---|---|
 | Frontend | React 19, TypeScript, Tailwind, shadcn/ui, Wouter, TanStack Query | `client/src/` |
-| API / backend | Node.js, Express, tRPC 11, TypeScript | `server/`, `server/routers/` |
-| Authorisation | Canonical tenant, role, property and placement guards | `server/authz.ts` |
-| Identity | MySQL-backed email/password credentials with signed HTTP-only sessions | `server/routers/localAuth.ts`, `server/services/localAuth.ts`, `server/_core/sdk.ts` |
-| Persistence | MySQL/TiDB, Drizzle ORM and migrations | `drizzle/schema.ts`, `drizzle/` |
-| File storage | Private object storage with database metadata and access checks | `server/storage.ts` |
-| Audit | Hash-linked audit events and receipt mirrors | `server/services/audit.ts` |
+| API / backend | PHP 8.3, Laravel, tRPC wire protocol | `laravel/app/Trpc/`, `laravel/app/Trpc/Routers/` |
+| Authorisation | Canonical tenant, role, property and placement guards | `laravel/app/Support/Authz.php` |
+| Identity | MySQL-backed email/password credentials with signed HTTP-only sessions | `laravel/app/Trpc/Routers/AuthRouter.php`, `laravel/app/Support/LocalAuth.php`, `laravel/app/Support/Jwt.php` |
+| Persistence | MySQL/MariaDB, schema and migrations defined with Drizzle | `drizzle/schema.ts`, `drizzle/` |
+| File storage | Private disk below the document root, re-checked on every download | `laravel/app/Support/EvidenceStorage.php`, `laravel/app/Http/Controllers/EvidenceController.php` |
+| Audit | Hash-linked audit events and object receipt mirrors | `laravel/app/Support/Audit.php` |
 
 The full technical handoff and rendered systems diagram are in [`docs/technical-system-architecture.md`](docs/technical-system-architecture.md) and [`docs/technical-system-architecture.png`](docs/technical-system-architecture.png).
 
 ## Prerequisites
 
-Use **Node.js 22+** and the project’s pinned **pnpm** version. You also need a development-only MySQL/TiDB database and a strong, one-time local owner bootstrap token.
+Use **Node.js 22+** and the project’s pinned **pnpm** version for the client and the schema tooling, and **PHP 8.3 with Composer** for the API. You also need a development-only MySQL/MariaDB database and a strong, one-time local owner bootstrap token.
 
 ```bash
 corepack enable
 pnpm install
+cd laravel && composer install
 ```
 
 ## Local Configuration
@@ -51,22 +54,22 @@ Read [`docs/local-environment-setup.md`](docs/local-environment-setup.md) and [`
 
 ## Run Frontend and Backend
 
-There is **one development command**; it starts the backend and serves the React frontend through Vite middleware with hot-module reload.
+Two processes: the API and the client. Run them in separate terminals.
 
 ```bash
-pnpm dev
+pnpm dev:api   # php artisan serve on 127.0.0.1:8000
+pnpm dev       # vite on :3000, proxying /api to the API
 ```
 
-The service chooses an available port, beginning with `PORT` when supplied or `3000` otherwise. Open the displayed local URL in your browser. Do not run a separate frontend process unless you are intentionally changing the application architecture.
+Open the Vite URL. The proxy target can be pointed elsewhere with `API_ORIGIN` if the API is not on the default port.
 
-### Production Build and Local Production Run
+### Production Build
 
 ```bash
 pnpm build
-pnpm start
 ```
 
-`pnpm build` creates the React assets in `dist/public` and bundles the Node server into `dist/index.js`. `pnpm start` serves the built application with `NODE_ENV=production`.
+This creates the React assets in `dist/public`. The API is deployed as the Laravel application rather than built; see [`docs/DEPLOY-HOSTINGER.md`](docs/DEPLOY-HOSTINGER.md) for the layout on the server.
 
 ## Database and Migrations
 
@@ -98,48 +101,41 @@ Guest links are separate from staff identity and provide only a deliberately res
 Run the following before proposing a release:
 
 ```bash
-pnpm check
-pnpm test
-pnpm build
+pnpm check                            # TypeScript across the client
+pnpm build                            # the client actually builds
+cd laravel && php vendor/bin/phpunit  # the API's rules
 ```
 
-Focused test files live beside their services and routers. The minimum security regression set should cover entity boundaries, property scope, placement assignment, access-control mutations, guest-invitation lifecycle, credential hashing, bootstrap-token validation, lockout state, password-reset lifecycle and safe unauthenticated responses.
+The PHP tests are unit tests over the rules the API enforces: authorisation, working time, retention, the age policy, escalation, offline sync and the printable-export controls. `CrossRuntimeTest` is the one to read first — it pins the session token, the encrypted-column and the audit-envelope formats against a fixture captured from the Node runtime, so a drift in any of them fails here rather than in a production audit chain that has to keep linking to rows that runtime wrote.
 
 ## Fictional Test Data
 
-The repository has a clearly labelled, isolated TEST scenario. It is for local/demo validation only and must not be mixed with operational data.
+The repository has a clearly labelled, isolated TEST scenario, described in [`docs/test-data-guide.md`](docs/test-data-guide.md). It is for local and demo validation only and must not be mixed with operational data.
 
-```bash
-pnpm testdata:load
-pnpm testdata:verify
-
-# Optional mock compliance evidence and reminder evaluation
-pnpm testdata:compliance
-pnpm testdata:compliance:evaluate
-pnpm testdata:compliance:verify
-```
+The `testdata:*` loader scripts that guide refers to are not in the repository — they were already absent before the Laravel port, and nothing here replaces them yet. Treat the guide as a description of the scenario rather than as runnable instructions.
 
 ## Key Development Rules
 
 All time values at the API and database layer are UTC Unix milliseconds. Store documents in object storage and keep metadata/authorisation records in the database. Never store file bytes in database columns.
 
-Use tRPC hooks from `client/src/lib/trpc.ts`; do not add ad hoc frontend HTTP wrappers. New protected procedures must use the canonical guards in `server/authz.ts`. When a user has narrow property or placement scope, validate it again on every server operation and log sensitive decisions through `server/services/audit.ts`.
+Use tRPC hooks from `client/src/lib/trpc.ts`; do not add ad hoc frontend HTTP wrappers. Note that those hooks are no longer typed from the API — the API is PHP, so there is nothing to infer from, and a call's input and output are `any`. Where a response shape is worth stating, state it on the screen that reads it, as `pages/RoleManagement.tsx` does.
 
-Scheduled work uses authenticated managed callbacks. Do not add a persistent worker or background daemon to this application. For any external integration, add required credentials through the secure project configuration workflow, never source files.
+New procedures go in a router under `laravel/app/Trpc/Routers/` and are registered in `RouterRegistrar`. Every protected one must use the canonical guards in `laravel/app/Support/Authz.php`. When a user has narrow property or placement scope, validate it again on every operation and record sensitive decisions through `laravel/app/Support/Audit.php`.
+
+There is no worker and no daemon. Anything that would have been background work runs in the request that asked for it — see `workspace.runAutomationNow` — because shared hosting has nowhere to keep a process alive, and a button that silently queued work nobody would run is worse than one that takes a moment.
 
 ## Project Structure
 
 ```text
 client/src/                 React pages, components, routes and client data hooks
-server/_core/               Express bootstrap, session context and Vite/static hosting
-server/routers/             tRPC domain routers
-server/services/            Authorisation-adjacent business services, audit and background logic
-server/authz.ts             Canonical tenant, role, property and placement authorisation
-drizzle/schema.ts           Typed MySQL/TiDB schema
+laravel/app/Trpc/           tRPC dispatcher, context, input checking
+laravel/app/Trpc/Routers/   One class per domain router
+laravel/app/Support/        Authorisation, rules, PDFs, crypto, audit
+laravel/tests/Unit/         Rule tests, including the cross-runtime format checks
+drizzle/schema.ts           Typed MySQL/MariaDB schema
 drizzle/*.sql               Generated, reviewed migration history
 docs/local-authentication-operations.md  Local email/password operational controls
-docs/                        Architecture, operator guidance and local setup material
-scripts/                    TEST-only fixture and verification utilities
+docs/                       Architecture, operator guidance and local setup material
 ```
 
 ## Release Procedure

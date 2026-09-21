@@ -26,26 +26,29 @@ jobs:
           extensions: pdo_mysql, mbstring, sodium, intl
           tools: composer
 
+      # Dev dependencies first, because phpunit is one of them. They are pruned
+      # again before the upload is assembled.
       - name: Install dependencies
         run: |
           npm ci
-          composer install --working-dir=laravel --no-dev --optimize-autoloader --no-interaction
+          composer install --working-dir=laravel --no-interaction
 
-      # The fixture is regenerated from the Node sources on every run, so a
-      # change to the session, superjson, audit-hash, capability or workflow
-      # format fails here rather than drifting apart in production.
-      - name: Regenerate the cross-runtime fixture
-        run: npx tsx laravel/tests/fixtures/make-fixture.ts > laravel/tests/fixtures/node-fixture.json
-        env:
-          JWT_SECRET: test-secret-value-1234567890
-
+      # tests/fixtures/node-fixture.json is a frozen capture from the Node
+      # runtime, which is gone. It stays because the session, superjson,
+      # audit-hash, capability and workflow formats in the production database
+      # were written by that runtime and PHP has to keep matching them.
       - name: Check the API
         run: |
           find laravel/app laravel/routes -name '*.php' -exec php -l {} \;
           php laravel/vendor/bin/phpunit --configuration laravel/phpunit.xml
 
-      - name: Build the client
-        run: npm run build
+      - name: Check and build the client
+        run: |
+          npm run check
+          npm run build
+
+      - name: Prune development dependencies
+        run: composer install --working-dir=laravel --no-dev --optimize-autoloader --no-interaction
 
       # public_html gets the built SPA, the rewrite rules and Laravel's public
       # entry point; the framework itself sits above the document root.

@@ -9,15 +9,60 @@ import { Textarea } from "@/components/ui/textarea";
 import { EmptyState, PageHeader } from "@/components/app/Primitives";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { trpc } from "@/lib/trpc";
-import type { inferRouterOutputs } from "@trpc/server";
-import type { AppRouter } from "../../../server/routers";
 import { Loader2, Lock, Plus, UserPlus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
-// Everything on this screen — roles, capabilities, pages, people — comes from the server.
-type Workspace = inferRouterOutputs<AppRouter>["roleManagement"]["workspace"];
-type Role = Workspace["roles"][number];
+/**
+ * Everything on this screen — roles, capabilities, pages, people — comes from
+ * the server, and this is the shape roleManagement.workspace returns.
+ *
+ * It is written out rather than inferred because the API is PHP
+ * (laravel/app/Trpc/Routers/RoleManagementRouter.php) and there is nothing to
+ * infer from. This is the one screen where the shape is worth stating: it
+ * renders a permission matrix, and a field quietly going missing would show as
+ * an empty column rather than an error.
+ */
+type Role = {
+  id: number;
+  name: string;
+  slug: string;
+  description: string | null;
+  status: string;
+  isBuiltIn: boolean;
+  isAdminAccount: boolean;
+  memberCount: number;
+  availablePaths: string[];
+  baseCapabilities: string[];
+  baseRole: string;
+  grantedCapabilities: string[];
+  deniedCapabilities: string[];
+  visiblePaths: string[] | null;
+  effectiveCapabilities: string[];
+  effectivePaths: string[];
+  delta: { added: string[]; removed: string[] };
+};
+
+type Workspace = {
+  roles: Role[];
+  pages: Array<{ path: string; label: string }>;
+  grantableCapabilities: Array<{ value: string; label: string }>;
+  allCapabilities: Array<{ value: string; label: string }>;
+  properties: Array<{ id: number; name: string; addressLine1: string | null }>;
+  members: Array<{
+    userId: number;
+    name: string | null;
+    email: string | null;
+    role: string;
+    roleId: number | null;
+    allProperties: boolean;
+    extraCapabilities: string[];
+    propertyIds: number[];
+    status: string;
+    accountStatus: string;
+    hasLocalCredential: boolean;
+  }>;
+};
 
 type RoleDraft = {
   id: number | null;

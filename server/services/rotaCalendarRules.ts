@@ -1,3 +1,0 @@
-import{TRPCError}from"@trpc/server";
-export function isStaleCalendarVersion(expected:number|undefined,current:number,toleranceMs=1000){return expected!==undefined&&Math.abs(current-expected)>toleranceMs;}
-export function requireCalendarOverride(warnings:string[],reason?:string){if(!warnings.length)return false;if(!reason?.trim())throw new TRPCError({code:"BAD_REQUEST",message:`This schedule change needs manager review: ${warnings.join(" ")} Enter an override reason of at least 20 characters or correct the shift.`});if(reason.trim().length<20)throw new TRPCError({code:"BAD_REQUEST",message:"Schedule override reason must contain at least 20 characters."});return true;}

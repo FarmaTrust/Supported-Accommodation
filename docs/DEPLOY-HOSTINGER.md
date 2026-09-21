@@ -2,9 +2,13 @@
 
 The account has a Cloud Startup shared plan and no VPS, and a VPS cannot be
 bought from a collaborator login. Shared hosting runs PHP and MySQL but cannot
-keep a Node process alive, so the Express/tRPC server in `server/` has no home
-there. The backend is being reimplemented as a Laravel application in
-`laravel/`, and the React client is deployed unchanged.
+keep a Node process alive, so the Express/tRPC server the application started
+as had no home there. It has been reimplemented as the Laravel application in
+`laravel/` and removed; the React client is deployed unchanged.
+
+References to `server/…` in this document and in the PHP docblocks name the
+file each behaviour came from. They resolve against the commit before the Node
+server was deleted.
 
 ## What the client never notices
 
@@ -45,7 +49,7 @@ URL reaches them directly.
 `laravel/bootstrap/app.php` loads the environment file from two levels above the
 application, which resolves to `~/domains/micare.online/.env` on the server and
 to the repository root during local development. One file therefore configures
-the Node server and the Laravel API without being duplicated.
+the Laravel API and the drizzle schema tooling without being duplicated.
 
 ## One-time setup
 
@@ -107,9 +111,8 @@ Repo → Settings → Secrets and variables → Actions:
 | `FTP_PASSWORD` | FTP account password |
 | `FTP_REMOTE_DIR` | `/domains/micare.online/` |
 
-Every push to `main` then runs `.github/workflows/deploy.yml`: it regenerates the
-cross-runtime fixture from the Node sources, lints and tests the PHP, builds the
-SPA, assembles the tree above and uploads it.
+Every push to `main` then runs `.github/workflows/deploy.yml`: it lints and
+tests the PHP, builds the SPA, assembles the tree above and uploads it.
 
 ## Running it locally
 
@@ -121,14 +124,16 @@ curl "http://127.0.0.1:8000/api/trpc/auth.me?batch=1&input=%7B%7D"
 The test suite needs no database or server:
 
 ```bash
-JWT_SECRET=test-secret-value-1234567890 \
-  npx tsx laravel/tests/fixtures/make-fixture.ts > laravel/tests/fixtures/node-fixture.json
 cd laravel && vendor/bin/phpunit
 ```
 
-The fixture holds real output from `jose`, `superjson`, the production
-`buildAuditEnvelope`, the capability matrix and the workflow guards, so the
-checks fail if either runtime drifts.
+`tests/fixtures/node-fixture.json` holds real output from `jose`, `superjson`,
+the production `buildAuditEnvelope`, the capability matrix and the workflow
+guards, captured while the Node sources still existed. Its generator went with
+them, so the file is now a frozen reference — which is what it needs to be. The
+session cookies, encrypted columns and audit rows in the production database
+were written in those formats, and the checks fail if PHP ever drifts from
+them.
 
 ## Passwords do not carry over
 
@@ -152,22 +157,28 @@ records each read. A presigned URL is a bearer token — whoever holds the link
 can fetch the file until it expires, whatever their role is by then — and these
 are photographs of a young person's room and scanned identity documents.
 
-**Scheduling.** The Node server registered cron jobs with the Manus heartbeat
-service. The schedule is now stored on the automation rule and read by a
-scheduled command, so one cron entry on the host drives every company's rules.
-Add it in hPanel → Advanced → Cron Jobs:
+**Scheduling.** The Node server registered one cron job per automation rule with
+the Manus heartbeat service, which called back with that rule's task id. There
+is no such service here. `php artisan automation:run` works out which companies
+have automation enabled and sweeps each of them, so one cron entry on the host
+drives every company's rules. Add it in hPanel → Advanced → Cron Jobs:
 
 ```
 * * * * * cd ~/domains/micare.online/laravel && php artisan schedule:run >/dev/null 2>&1
 ```
 
+The entry runs every minute; the sweep itself is scheduled hourly in
+`laravel/routes/console.php`, with `withoutOverlapping` so a long run on a large
+company cannot have a second copy start beside it. One company failing does not
+stop the rest, and a failed sweep is written to the audit trail — a company
+nobody is being chased about should be visible somewhere other than a log file.
+
 ## Port status
 
-The Laravel API is not yet a complete replacement for the Node server. See the
-git log for what each router covers; `laravel/app/Trpc/RouterRegistrar.php` is
-the authoritative list of what is wired up. A procedure that has not been ported
-answers `NOT_FOUND`, so an unported screen fails visibly rather than silently
-returning nothing.
+Complete. All 313 procedures the client calls are implemented in
+`laravel/app/Trpc/Routers/`, and `laravel/app/Trpc/RouterRegistrar.php` is the
+authoritative list of what is wired up. A path that is not registered answers
+`NOT_FOUND`, so a mistake fails visibly rather than silently returning nothing.
 
-`server/` stays in the repository until the port is finished: it is both the
-reference the PHP is written against and the runtime that still works.
+The Node server has been removed. It is in the git history if a behaviour ever
+needs checking against the original.
