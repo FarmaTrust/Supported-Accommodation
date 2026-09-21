@@ -5,15 +5,20 @@ declare(strict_types=1);
 namespace App\Trpc\Routers;
 
 use App\Support\Audit;
+use App\Support\Authz;
+use App\Support\ColleagueProvisioning;
 use App\Support\Dates;
+use App\Support\Jwt;
 use App\Support\LocalAuth;
 use App\Support\ResetEmail;
+use App\Support\TestReset;
 use App\Support\Users;
 use App\Trpc\Context;
 use App\Trpc\Registry;
 use App\Trpc\TrpcException;
 use App\Trpc\Validate;
 use Illuminate\Support\Facades\DB;
+use Throwable;
 
 /**
  * auth.* and localAuth.*, mirroring server/routers.ts and
@@ -72,6 +77,10 @@ final class AuthRouter
             if ($result['status'] !== 'success') {
                 throw self::signInFailure();
             }
+
+            // Signing in is the first moment the address is known to be theirs,
+            // so any invitation waiting on it becomes a membership now.
+            ColleagueProvisioning::acceptPending((int) $result['user']['id'], $result['user']['email'] ?? null);
 
             $ctx->setSessionCookie(LocalAuth::issueSession($result['user'], $result['passwordVersion']));
 
@@ -136,10 +145,32 @@ final class AuthRouter
             $user = Users::byEmail($email);
             $deliveryEnabled = ResetEmail::isConfigured();
 
+            // A fictional training account has no mailbox to send to, so it is
+            // shown its link instead. TestReset decides eligibility.
+            if ($user !== null && $user['email']) {
+                $testReset = TestReset::createVisibleResetLink((int) $user['id'], (string) $user['email']);
+                if ($testReset !== null) {
+                    return [
+                        'success' => true,
+                        'emailDeliveryEnabled' => false,
+                        'testingResetUrl' => $testReset['url'],
+                        'expiresAt' => $testReset['expiresAt'],
+                        'message' => 'TEST account only: copy the visible reset link. It expires in one hour and cannot access operational-company records.',
+                    ];
+                }
+            }
+
             // The reply is identical whether or not the address is known.
             if ($user !== null && $user['email']) {
                 if ($deliveryEnabled) {
-                    $reset = LocalAuth::issuePasswordReset((int) $user['id']);
+                    try {
+                        $reset = LocalAuth::issuePasswordReset((int) $user['id']);
+                    } catch (Throwable) {
+                        // An account with no local credential cannot be issued a
+                        // reset. Swallowed rather than reported, so the reply
+                        // stays the same as for an unknown address.
+                        return self::resetAcknowledgement($deliveryEnabled);
+                    }
                     $delivery = ResetEmail::send((string) $user['email'], $reset['token']);
                     Audit::write([
                         'actorUserId' => (int) $user['id'],
@@ -163,14 +194,7 @@ final class AuthRouter
                 }
             }
 
-            return [
-                'success' => true,
-                'emailDeliveryEnabled' => $deliveryEnabled,
-                'testingResetUrl' => null,
-                'message' => $deliveryEnabled
-                    ? 'If the account is eligible, a password-reset link has been sent. Check your email or contact your company administrator.'
-                    : 'Password-reset email is disabled for testing. Contact your company administrator to issue a temporary password.',
-            ];
+            return self::resetAcknowledgement($deliveryEnabled);
         });
 
         $registry->mutation('localAuth.resetPassword', Registry::PUBLIC, static function (Context $ctx, mixed $input): array {
@@ -243,6 +267,128 @@ final class AuthRouter
 
             return ['success' => true];
         });
+
+        $registry->mutation('localAuth.adminSetPassword', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            Authz::assertEntityCapability($ctx->userId(), $entityId, 'config.write');
+
+            $email = Validate::email($input['email'] ?? null);
+            $normalizedEmail = LocalAuth::normaliseEmail($email);
+            $displayName = Validate::optionalString($input['displayName'] ?? null, 'displayName', 180);
+            $temporaryPassword = Validate::password($input['temporaryPassword'] ?? null, 'temporaryPassword');
+            $reason = Validate::string($input['reason'] ?? null, 'reason', 12, 1000);
+
+            $user = Users::byEmail($normalizedEmail);
+
+            $pending = DB::table('colleagueInvitations')
+                ->where('entityId', $entityId)
+                ->where('emailNormalized', $normalizedEmail)
+                ->where('status', 'pending')
+                ->first('id');
+
+            $membership = $user === null ? null : DB::table('entityMemberships')
+                ->where('entityId', $entityId)
+                ->where('userId', (int) $user['id'])
+                ->first('id');
+
+            // A password is only ever set for somebody this company has already
+            // decided to let in. Without this an administrator could mint a
+            // credential for any address at all.
+            if ($membership === null && $pending === null) {
+                throw TrpcException::forbidden('Create an approved colleague invitation before issuing local credentials.');
+            }
+
+            if ($user === null) {
+                $openId = 'local_' . Jwt::base64UrlEncode(random_bytes(18));
+                DB::table('users')->insert([
+                    'openId' => $openId,
+                    'name' => $displayName ?? explode('@', $normalizedEmail)[0],
+                    'email' => $normalizedEmail,
+                    'loginMethod' => 'email_password',
+                    'roleId' => Users::builtInRoleId('support_worker'),
+                    'accountStatus' => 'active',
+                ]);
+                $user = Users::byOpenId($openId);
+                if ($user === null) {
+                    throw new TrpcException('INTERNAL_SERVER_ERROR', 'The account could not be created. Try again shortly.');
+                }
+            }
+
+            $targetUserId = (int) $user['id'];
+
+            // requireChangeOnNextLogin: the administrator knows this password, so
+            // it is only good for the one sign-in that replaces it.
+            $result = LocalAuth::createOrReplaceCredential($targetUserId, $normalizedEmail, $temporaryPassword, true);
+            ColleagueProvisioning::acceptPending($targetUserId, $normalizedEmail);
+
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'action' => 'auth.local.admin_password_set',
+                'resourceType' => 'local_auth_credential',
+                'resourceId' => $targetUserId,
+                'sensitivity' => 'restricted',
+                'result' => 'success',
+                'reasonCode' => 'authorised_colleague_credential',
+                'metadata' => ['targetUserId' => $targetUserId, 'reason' => $reason, 'created' => $result['created']],
+            ]);
+
+            return ['success' => true];
+        });
+
+        $registry->mutation('localAuth.adminCreateReset', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            Authz::assertEntityCapability($ctx->userId(), $entityId, 'config.write');
+
+            $targetUserId = Validate::id($input['targetUserId'] ?? null, 'targetUserId');
+            $reason = Validate::string($input['reason'] ?? null, 'reason', 12, 1000);
+
+            $membership = DB::table('entityMemberships')
+                ->where('entityId', $entityId)
+                ->where('userId', $targetUserId)
+                ->where('status', 'active')
+                ->first('id');
+
+            if ($membership === null) {
+                throw TrpcException::forbidden('The selected account is not active in this company.');
+            }
+
+            $reset = LocalAuth::issuePasswordReset($targetUserId);
+
+            // The token is returned for the administrator to hand over directly,
+            // so it is the one thing kept out of the audit metadata.
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'action' => 'auth.local.reset_issued',
+                'resourceType' => 'local_auth_credential',
+                'resourceId' => $targetUserId,
+                'sensitivity' => 'restricted',
+                'result' => 'success',
+                'reasonCode' => 'company_admin_reset',
+                'metadata' => ['reason' => $reason, 'expiresAt' => $reset['expiresAt']],
+            ]);
+
+            return $reset;
+        });
+    }
+
+    /**
+     * The one reply every reset request gets once the eligible-account branches
+     * are done with, so a caller cannot tell the outcomes apart.
+     *
+     * @return array<string, mixed>
+     */
+    private static function resetAcknowledgement(bool $deliveryEnabled): array
+    {
+        return [
+            'success' => true,
+            'emailDeliveryEnabled' => $deliveryEnabled,
+            'testingResetUrl' => null,
+            'message' => $deliveryEnabled
+                ? 'If the account is eligible, a password-reset link has been sent. Check your email or contact your company administrator.'
+                : 'Password-reset email is disabled for testing. Contact your company administrator to issue a temporary password.',
+        ];
     }
 
     private static function signInFailure(): TrpcException
