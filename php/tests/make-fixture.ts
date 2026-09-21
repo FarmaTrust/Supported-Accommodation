@@ -9,6 +9,7 @@
 import { SignJWT } from "jose";
 import superjson from "superjson";
 import { buildAuditEnvelope } from "../../server/services/audit";
+import { allCapabilities, roleCapabilities } from "../../server/authz";
 
 const secret = new TextEncoder().encode("test-secret-value-1234567890");
 
@@ -63,6 +64,12 @@ console.log(
       auditInput,
       auditNoMeta,
       auditWithMeta,
+      // The role matrix is security-critical: the PHP copy is compared against
+      // these exact sets rather than against a reading of the source.
+      allCapabilities,
+      roleCapabilities: Object.fromEntries(
+        Object.entries(roleCapabilities).map(([role, caps]) => [role, [...caps].sort()]),
+      ),
     },
     null,
     2,
