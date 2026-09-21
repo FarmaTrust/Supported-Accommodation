@@ -16,6 +16,7 @@ final class RouterRegistrar
     /** @var array<int, class-string> */
     private const ROUTERS = [
         Routers\AuthRouter::class,
+        Routers\ComplianceRouter::class,
         Routers\EntitiesRouter::class,
         Routers\StaffWorkspaceRouter::class,
         Routers\WorkspaceRouter::class,

@@ -91,6 +91,20 @@ final class Rules
         return ['status' => 'valid', 'ragStatus' => 'green'];
     }
 
+    /**
+     * A property obligation is red while its certificate has no evidence
+     * attached, whatever its date says. A renewal nobody can produce a
+     * certificate for is not green because it is not due yet.
+     */
+    public static function propertyObligationRag(?string $sourceType, ?int $evidenceDocumentId, ?int $dueAt, ?int $completedAt, int $leadDays, ?int $nowMs = null): string
+    {
+        if ($sourceType === 'property_evidence' && $evidenceDocumentId === null) {
+            return 'red';
+        }
+
+        return self::ragStatus($dueAt, $completedAt, $leadDays, $nowMs);
+    }
+
     /** The obligation status that pairs with a rag colour. */
     public static function obligationStatusFor(string $ragStatus): string
     {
