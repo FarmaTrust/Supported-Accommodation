@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\EvidenceController;
 use App\Http\Controllers\TrpcController;
 use Illuminate\Support\Facades\Route;
 
@@ -12,3 +13,11 @@ use Illuminate\Support\Facades\Route;
  */
 Route::match(['get', 'post'], 'trpc/{path}', TrpcController::class)
     ->where('path', '.*');
+
+/*
+ * Uploaded evidence. Files are held outside the document root, so this route is
+ * the only way to them, and it re-checks permission on every request rather
+ * than handing out a link that works on its own.
+ */
+Route::get('evidence/{key}', EvidenceController::class)
+    ->where('key', '.*');

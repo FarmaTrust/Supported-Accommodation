@@ -8,6 +8,7 @@ use App\Support\Audit;
 use App\Support\Authz;
 use App\Support\Dates;
 use App\Support\EncryptedFields;
+use App\Support\EvidenceStorage;
 use App\Support\StaffWorkspaceSupport;
 use App\Support\WorkspaceGuards;
 use App\Support\WorkspacePolicy;
@@ -117,6 +118,16 @@ final class StaffWorkspaceRouter
 
     private const FINANCE_DISCREPANCY_TYPES = [
         'cash_short', 'cash_over', 'missing_receipt', 'duplicate', 'unauthorised', 'calculation', 'other',
+    ];
+
+    private const LINK_TYPES = [
+        'evidence', 'photo', 'id_document', 'receipt', 'certificate', 'statement', 'completion', 'other',
+    ];
+
+    /** Records that can only be changed through a correction once submitted. */
+    private const CORRECTABLE_TYPES = [
+        'key_worker_report', 'keywork_session', 'daily_note', 'incident',
+        'property_check', 'medication_discrepancy', 'resident_finance_transaction',
     ];
 
     public static function register(Registry $registry): void
@@ -1806,6 +1817,325 @@ final class StaffWorkspaceRouter
 
             return ['id' => $id];
         });
+
+        $registry->mutation('staffWorkspace.uploadEvidence', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            Authz::assertEntityCapability($ctx->userId(), $entityId, 'frontline.write');
+
+            $propertyId = Validate::optionalId($input['propertyId'] ?? null, 'propertyId');
+            $placementId = Validate::optionalId($input['placementId'] ?? null, 'placementId');
+
+            if ($propertyId !== null) {
+                Authz::assertCurrentShiftPropertyCapability($ctx->userId(), $entityId, $propertyId, 'frontline.write');
+            }
+            if ($placementId !== null) {
+                Authz::assertCurrentShiftPlacementCapability($ctx->userId(), $placementId, 'young_person.write');
+            }
+
+            $classification = Validate::enum(
+                $input['classification'] ?? null,
+                ['general', 'hr', 'finance', 'safeguarding', 'restricted'],
+                'classification',
+            );
+
+            if (in_array($classification, ['restricted', 'safeguarding'], true)) {
+                WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, $classification, 'write', $placementId);
+            }
+
+            $resourceType = Validate::optionalString($input['resourceType'] ?? null, 'resourceType', 80);
+            $resourceId = Validate::optionalString($input['resourceId'] ?? null, 'resourceId', 80);
+            $linkType = isset($input['linkType'])
+                ? Validate::enum($input['linkType'], self::LINK_TYPES, 'linkType')
+                : null;
+
+            // Half a link is worse than none: it would leave a document that
+            // claims a parent it is not actually attached to.
+            if (($resourceType === null) !== ($resourceId === null)
+                || ($resourceType !== null && $linkType === null)) {
+                throw WorkspacePolicy::fieldError(
+                    'evidence_link_incomplete', 'resourceId',
+                    'A linked resource type, ID and link type must be provided together.',
+                );
+            }
+
+            if ($resourceType !== null && $resourceId !== null) {
+                // Evidence inherits the permission of what it is attached to.
+                StaffWorkspaceSupport::assertEvidenceParent($ctx->userId(), $entityId, $resourceType, $resourceId);
+            }
+
+            $stored = EvidenceStorage::putBase64(
+                $entityId,
+                $ctx->userId(),
+                Validate::string($input['fileName'] ?? null, 'fileName', 1, 300),
+                Validate::enum($input['mimeType'] ?? null, EvidenceStorage::ALLOWED_MIME_TYPES, 'mimeType'),
+                Validate::string($input['contentBase64'] ?? null, 'contentBase64', 4, 11500000, false),
+            );
+
+            $title = Validate::string($input['title'] ?? null, 'title', 3, 240);
+            $documentType = Validate::enum($input['documentType'] ?? 'evidence', ['certificate', 'evidence', 'other'], 'documentType');
+            $retentionUntil = isset($input['retentionUntil']) ? Validate::int($input['retentionUntil'], 'retentionUntil') : null;
+            $retentionBasis = Validate::optionalString($input['retentionBasis'] ?? null, 'retentionBasis', 220);
+            $mimeType = $input['mimeType'];
+
+            $documentId = DB::transaction(static function () use ($ctx, $entityId, $propertyId, $title, $documentType, $classification, $retentionUntil, $retentionBasis, $stored, $mimeType, $resourceType, $resourceId, $linkType): int {
+                // Uploaded evidence starts in review rather than approved: it has
+                // not been checked by anyone yet.
+                $id = (int) DB::table('documents')->insertGetId([
+                    'entityId' => $entityId,
+                    'propertyId' => $propertyId,
+                    'title' => $title,
+                    'documentType' => $documentType,
+                    'classification' => $classification,
+                    'status' => 'in_review',
+                    'retentionUntil' => $retentionUntil,
+                    'retentionBasis' => $retentionBasis,
+                    'createdBy' => $ctx->userId(),
+                ]);
+
+                DB::table('documentVersions')->insert([
+                    'documentId' => $id,
+                    'version' => 1,
+                    'fileKey' => $stored['key'],
+                    'fileUrl' => $stored['url'],
+                    'fileName' => $stored['fileName'],
+                    'mimeType' => $mimeType,
+                    'sizeBytes' => $stored['sizeBytes'],
+                    'contentHash' => $stored['contentHash'],
+                    // No malware scanner is connected in this deployment, and
+                    // saying so is better than implying the file was cleared.
+                    'scanStatus' => 'not_available',
+                    'createdBy' => $ctx->userId(),
+                ]);
+
+                if ($resourceType !== null && $resourceId !== null && $linkType !== null) {
+                    DB::table('recordDocumentLinks')->insert([
+                        'entityId' => $entityId,
+                        'documentId' => $id,
+                        'resourceType' => $resourceType,
+                        'resourceId' => $resourceId,
+                        'linkType' => $linkType,
+                        'createdBy' => $ctx->userId(),
+                    ]);
+                }
+
+                // A staff request keeps a pointer to its first piece of evidence.
+                // Only when it has none, so a later upload cannot quietly replace
+                // what a manager already reviewed.
+                if ($resourceType === 'staff_request' && $resourceId !== null) {
+                    DB::table('staffRequests')
+                        ->where('id', (int) $resourceId)
+                        ->where('entityId', $entityId)
+                        ->whereNull('evidenceDocumentId')
+                        ->update(['evidenceDocumentId' => $id]);
+                }
+
+                return $id;
+            });
+
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'action' => 'workspace.evidence_upload',
+                'resourceType' => 'document',
+                'resourceId' => $documentId,
+                'sensitivity' => $classification,
+                'result' => 'success',
+                'metadata' => [
+                    'mimeType' => $mimeType,
+                    'sizeBytes' => $stored['sizeBytes'],
+                    'linked' => $resourceType !== null,
+                    'malwareScan' => 'not_available',
+                ],
+            ]);
+
+            return ['documentId' => $documentId, 'url' => $stored['url'], 'scanStatus' => 'not_available'];
+        });
+
+        $registry->mutation('staffWorkspace.proposeCorrection', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $resourceType = Validate::enum($input['resourceType'] ?? null, self::CORRECTABLE_TYPES, 'resourceType');
+            $resourceId = Validate::string($input['resourceId'] ?? null, 'resourceId', 1, 80);
+
+            StaffWorkspaceSupport::assertEvidenceParent($ctx->userId(), $entityId, $resourceType, $resourceId);
+
+            // A record is only corrected once it has left the author's hands. A
+            // draft is simply edited.
+            if ($resourceType === 'key_worker_report') {
+                $source = DB::table('keyWorkerReports')->where('id', (int) $resourceId)->first('status');
+                if ($source === null) {
+                    throw TrpcException::notFound('Report not found');
+                }
+                WorkspacePolicy::assertRecordState((string) $source->status, ['submitted', 'reviewed', 'returned', 'approved', 'locked']);
+            }
+            if ($resourceType === 'incident') {
+                $source = DB::table('incidents')->where('id', (int) $resourceId)->first('status');
+                if ($source === null) {
+                    throw TrpcException::notFound('Incident not found');
+                }
+                WorkspacePolicy::assertRecordState((string) $source->status, ['open', 'under_review', 'notifications_due', 'notifications_complete', 'closed']);
+            }
+
+            $original = Validate::optionalString($input['originalValue'] ?? null, 'originalValue', 12000) ?? '';
+            $affectedOutputs = isset($input['affectedOutputs']) ? Validate::arrayOf($input['affectedOutputs'], 'affectedOutputs', 30) : null;
+            $recipients = isset($input['notificationRecipients']) ? Validate::arrayOf($input['notificationRecipients'], 'notificationRecipients', 50) : null;
+
+            $correctionId = (int) DB::table('recordCorrections')->insertGetId([
+                'entityId' => $entityId,
+                'placementId' => Validate::optionalId($input['placementId'] ?? null, 'placementId'),
+                'resourceType' => $resourceType,
+                'resourceId' => $resourceId,
+                'fieldPath' => Validate::string($input['fieldPath'] ?? null, 'fieldPath', 1, 240),
+                // The hash lets a reviewer confirm what the value was without the
+                // original having to be readable to them.
+                'originalValueHash' => hash('sha256', $original),
+                'originalValueCiphertext' => EncryptedFields::seal($original === '' ? null : $original),
+                'correctedValueCiphertext' => EncryptedFields::seal(Validate::string($input['correctedValue'] ?? null, 'correctedValue', 1, 12000)),
+                'reason' => Validate::string($input['reason'] ?? null, 'reason', 10, 4000),
+                'affectedOutputs' => $affectedOutputs === null ? null : json_encode($affectedOutputs, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'notificationRecipients' => $recipients === null ? null : json_encode($recipients),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'action' => 'record_correction.proposed',
+                'resourceType' => $resourceType,
+                'resourceId' => $resourceId,
+                'sensitivity' => 'restricted',
+                'result' => 'success',
+                'metadata' => ['correctionId' => $correctionId, 'fieldPath' => $input['fieldPath']],
+            ]);
+
+            return ['id' => $correctionId];
+        });
+
+        $registry->mutation('staffWorkspace.decideCorrection', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $correctionId = Validate::id($input['correctionId'] ?? null, 'correctionId');
+            $decision = Validate::enum($input['decision'] ?? null, ['approved', 'rejected'], 'decision');
+            $reviewReason = Validate::string($input['reviewReason'] ?? null, 'reviewReason', 5, 4000);
+
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $row = DB::table('recordCorrections')->where('id', $correctionId)->where('entityId', $entityId)->first();
+            if ($row === null) {
+                throw TrpcException::notFound('Correction not found');
+            }
+
+            WorkspacePolicy::assertRecordState((string) $row->status, ['proposed']);
+            WorkspacePolicy::assertIndependentReviewer($row->createdBy === null ? null : (int) $row->createdBy, $ctx->userId());
+
+            DB::table('recordCorrections')->where('id', $row->id)->update([
+                'status' => $decision,
+                'approvedBy' => $decision === 'approved' ? $ctx->userId() : null,
+                // The previous value is kept alongside the reason, so the trail
+                // of a correction is itself not overwritten.
+                'affectedOutputs' => json_encode([
+                    'previous' => self::decodeJsonColumn($row->affectedOutputs),
+                    'reviewReason' => $reviewReason,
+                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            ]);
+
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'action' => "record_correction.$decision",
+                'resourceType' => (string) $row->resourceType,
+                'resourceId' => (string) $row->resourceId,
+                'sensitivity' => 'restricted',
+                'result' => 'success',
+                'metadata' => ['correctionId' => (int) $row->id],
+            ]);
+
+            return ['success' => true];
+        });
+
+        $registry->mutation('staffWorkspace.applyCorrection', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $correctionId = Validate::id($input['correctionId'] ?? null, 'correctionId');
+            $applicationReason = Validate::string($input['applicationReason'] ?? null, 'applicationReason', 10, 4000);
+
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $row = DB::table('recordCorrections')->where('id', $correctionId)->where('entityId', $entityId)->first();
+            if ($row === null) {
+                throw TrpcException::notFound('Correction not found');
+            }
+
+            WorkspacePolicy::assertRecordState((string) $row->status, ['approved']);
+            WorkspacePolicy::assertIndependentReviewer($row->createdBy === null ? null : (int) $row->createdBy, $ctx->userId());
+
+            DB::table('recordCorrections')->where('id', $row->id)->update([
+                'status' => 'applied',
+                'appliedBy' => $ctx->userId(),
+                'appliedAt' => Dates::nowMillis(),
+                'affectedOutputs' => json_encode([
+                    'previous' => self::decodeJsonColumn($row->affectedOutputs),
+                    'applicationReason' => $applicationReason,
+                    // A correction is shown as an addendum, never by rewriting
+                    // what was originally recorded.
+                    'displayAsAddendum' => true,
+                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            ]);
+
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'action' => 'record_correction.applied',
+                'resourceType' => (string) $row->resourceType,
+                'resourceId' => (string) $row->resourceId,
+                'sensitivity' => 'restricted',
+                'result' => 'success',
+                'metadata' => ['correctionId' => (int) $row->id, 'fieldPath' => $row->fieldPath],
+            ]);
+
+            return ['success' => true, 'displayAsAddendum' => true];
+        });
+
+        $registry->mutation('staffWorkspace.linkDocument', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $documentId = Validate::id($input['documentId'] ?? null, 'documentId');
+            $resourceType = Validate::string($input['resourceType'] ?? null, 'resourceType', 2, 80);
+            $resourceId = Validate::string($input['resourceId'] ?? null, 'resourceId', 1, 80);
+            $linkType = Validate::enum($input['linkType'] ?? null, self::LINK_TYPES, 'linkType');
+
+            Authz::assertEntityCapability($ctx->userId(), $entityId, 'document.read');
+            StaffWorkspaceSupport::assertEvidenceParent($ctx->userId(), $entityId, $resourceType, $resourceId);
+
+            $document = DB::table('documents')->where('id', $documentId)->where('entityId', $entityId)->first();
+            if ($document === null) {
+                throw TrpcException::notFound('Document not found');
+            }
+
+            // Attaching a restricted document somewhere new makes it reachable
+            // from there, so the caller has to be allowed to read it first.
+            if (in_array($document->classification, ['restricted', 'safeguarding', 'bank'], true)) {
+                WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, (string) $document->classification, 'read');
+            }
+
+            $id = (int) DB::table('recordDocumentLinks')->insertGetId([
+                'entityId' => $entityId,
+                'documentId' => $documentId,
+                'resourceType' => $resourceType,
+                'resourceId' => $resourceId,
+                'linkType' => $linkType,
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+    }
+
+    /** A json column comes back as a string from MySQL and an array from MariaDB. */
+    private static function decodeJsonColumn(mixed $value): mixed
+    {
+        if (is_string($value) && $value !== '') {
+            return json_decode($value, true);
+        }
+
+        return $value;
     }
 
     /**
