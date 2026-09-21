@@ -85,6 +85,10 @@ final class StaffWorkspaceRouter
         'medication', 'property', 'other',
     ];
 
+    private const STAFF_REQUEST_TYPES = [
+        'contact_change', 'certificate_submission', 'sickness', 'holiday', 'availability_change',
+    ];
+
     public static function register(Registry $registry): void
     {
         $registry->query('staffWorkspace.context', Registry::USER, static function (Context $ctx, mixed $input): array {
@@ -1189,6 +1193,291 @@ final class StaffWorkspaceRouter
 
             return ['success' => true];
         });
+
+        $registry->mutation('staffWorkspace.addInvestigationAction', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $investigationId = Validate::id($input['investigationId'] ?? null, 'investigationId');
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $parent = DB::table('investigations')->where('id', $investigationId)->where('entityId', $entityId)->first('id');
+            if ($parent === null) {
+                throw TrpcException::notFound('Investigation not found');
+            }
+
+            $id = (int) DB::table('investigationActions')->insertGetId([
+                'entityId' => $entityId,
+                'investigationId' => $investigationId,
+                'workPlanActionId' => Validate::optionalId($input['workPlanActionId'] ?? null, 'workPlanActionId'),
+                'title' => Validate::string($input['title'] ?? null, 'title', 2, 220),
+                'ownerUserId' => Validate::optionalId($input['ownerUserId'] ?? null, 'ownerUserId'),
+                'dueAt' => isset($input['dueAt']) ? Validate::int($input['dueAt'], 'dueAt') : null,
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.submitStaffRequest', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            WorkspaceGuards::assertHrAccess($ctx->userId(), $entityId, $ctx->userId(), 'write');
+
+            $startsAt = isset($input['startsAt']) ? Validate::int($input['startsAt'], 'startsAt') : null;
+            $endsAt = isset($input['endsAt']) ? Validate::int($input['endsAt'], 'endsAt') : null;
+
+            if ($startsAt !== null && $endsAt !== null && $endsAt <= $startsAt) {
+                throw WorkspacePolicy::fieldError('date_range_invalid', 'endsAt', 'End must be after start');
+            }
+
+            $profile = DB::table('staffProfiles')
+                ->where('entityId', $entityId)->where('userId', $ctx->userId())->first('id');
+
+            if ($profile === null) {
+                throw TrpcException::notFound('Staff profile not found');
+            }
+
+            $proposedChanges = isset($input['proposedChanges'])
+                ? Validate::object($input['proposedChanges'], 'proposedChanges')
+                : null;
+
+            $id = (int) DB::table('staffRequests')->insertGetId([
+                'entityId' => $entityId,
+                'staffProfileId' => (int) $profile->id,
+                'userId' => $ctx->userId(),
+                'requestType' => Validate::enum($input['requestType'] ?? null, self::STAFF_REQUEST_TYPES, 'requestType'),
+                'startsAt' => $startsAt,
+                'endsAt' => $endsAt,
+                // A sickness or contact-change request carries personal
+                // information about the member of staff.
+                'detailsCiphertext' => EncryptedFields::seal(Validate::string($input['details'] ?? null, 'details', 3, 6000)),
+                'proposedChanges' => $proposedChanges === null ? null : json_encode($proposedChanges, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'evidenceDocumentId' => Validate::optionalId($input['evidenceDocumentId'] ?? null, 'evidenceDocumentId'),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.reviewStaffRequest', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $requestId = Validate::id($input['requestId'] ?? null, 'requestId');
+            $decision = Validate::enum($input['decision'] ?? null, ['approved', 'declined', 'returned'], 'decision');
+            $expectedVersion = Validate::int($input['expectedVersion'] ?? null, 'expectedVersion', 1);
+            $notes = Validate::optionalString($input['notes'] ?? null, 'notes', 4000);
+
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $row = DB::table('staffRequests')->where('id', $requestId)->where('entityId', $entityId)->first();
+            if ($row === null) {
+                throw TrpcException::notFound('Staff request not found');
+            }
+
+            // Declining or returning somebody's sickness or holiday request
+            // without a reason is not a decision they can act on.
+            if ($decision !== 'approved' && strlen(trim((string) $notes)) < 10) {
+                throw WorkspacePolicy::fieldError(
+                    'staff_review_reason_required', 'notes',
+                    'Add a clear reason of at least 10 characters before returning or rejecting this request.',
+                );
+            }
+
+            WorkspaceGuards::assertHrAccess($ctx->userId(), $entityId, (int) $row->userId, 'write');
+            WorkspacePolicy::assertIndependentReviewer((int) $row->userId, $ctx->userId());
+            WorkspacePolicy::assertExpectedVersion((int) $row->version, $expectedVersion);
+            WorkspacePolicy::assertTransition('staff_request', (string) $row->status, $decision);
+
+            $now = Dates::nowMillis();
+            $version = (int) $row->version + 1;
+            $alert = self::staffRequestOutcomeNotification((int) $row->userId, (int) $row->id, $decision, $version);
+
+            DB::transaction(static function () use ($ctx, $entityId, $row, $decision, $notes, $now, $version, $alert): void {
+                DB::table('staffRequests')->where('id', $row->id)->update([
+                    'status' => $decision,
+                    'reviewNotesCiphertext' => EncryptedFields::seal($notes),
+                    'reviewedBy' => $ctx->userId(),
+                    'reviewedAt' => $now,
+                    'version' => $version,
+                ]);
+
+                // The outcome reaches the person who asked, in the same
+                // transaction as the decision, so a request cannot be answered
+                // without them being told.
+                DB::table('notifications')->upsert(
+                    [['entityId' => $entityId] + $alert],
+                    ['dedupeKey'],
+                    ['title', 'message', 'severity', 'deepLink', 'readAt', 'resolvedAt', 'snoozedUntil', 'escalationState'],
+                );
+            });
+
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'action' => 'staff_request.reviewed',
+                'resourceType' => 'staff_request',
+                'resourceId' => (int) $row->id,
+                'sensitivity' => 'hr',
+                'result' => 'success',
+                'metadata' => [
+                    'outcome' => $decision,
+                    'evidenceAttached' => $row->evidenceDocumentId !== null,
+                    'version' => $version,
+                ],
+            ]);
+
+            Audit::write([
+                'actorUserId' => $ctx->userId(),
+                'entityId' => $entityId,
+                'action' => 'staff_request.outcome_notification',
+                'resourceType' => 'staff_request',
+                'resourceId' => (int) $row->id,
+                'sensitivity' => 'hr',
+                'result' => 'success',
+                'metadata' => [
+                    'outcome' => $decision,
+                    'recipientUserId' => (int) $row->userId,
+                    'notificationDedupeKey' => $alert['dedupeKey'],
+                ],
+            ]);
+
+            return ['success' => true, 'notificationQueued' => true];
+        });
+
+        $registry->mutation('staffWorkspace.createSupervision', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+            WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, 'hr', 'write');
+
+            $id = (int) DB::table('supervisionSessions')->insertGetId([
+                'entityId' => $entityId,
+                'staffProfileId' => Validate::id($input['staffProfileId'] ?? null, 'staffProfileId'),
+                'scheduledAt' => Validate::int($input['scheduledAt'] ?? null, 'scheduledAt'),
+                'location' => Validate::optionalString($input['location'] ?? null, 'location', 220),
+                'managerUserId' => $ctx->userId(),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.updateSupervision', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $supervisionId = Validate::id($input['supervisionId'] ?? null, 'supervisionId');
+            $nextStatus = Validate::enum(
+                $input['nextStatus'] ?? null,
+                ['draft', 'submitted', 'acknowledged', 'completed', 'cancelled'],
+                'nextStatus',
+            );
+            $expectedVersion = Validate::int($input['expectedVersion'] ?? null, 'expectedVersion', 1);
+            $sharedNotes = Validate::optionalString($input['sharedNotes'] ?? null, 'sharedNotes', 10000);
+            $managerNotes = Validate::optionalString($input['managerNotes'] ?? null, 'managerNotes', 10000);
+
+            $row = DB::table('supervisionSessions')->where('id', $supervisionId)->where('entityId', $entityId)->first();
+            if ($row === null) {
+                throw TrpcException::notFound('Supervision session not found');
+            }
+
+            $profile = DB::table('staffProfiles')->where('id', $row->staffProfileId)->first(['id', 'userId']);
+            if ($profile === null || $profile->userId === null) {
+                throw TrpcException::notFound('Staff profile is not linked to an active user');
+            }
+
+            $isSubject = (int) $profile->userId === $ctx->userId();
+
+            WorkspaceGuards::assertHrAccess($ctx->userId(), $entityId, (int) $profile->userId, 'write');
+            if (!$isSubject) {
+                WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+            }
+
+            // A supervision session holds notes the supervisee sees and notes
+            // only the manager sees. The supervisee can neither write nor
+            // overwrite the second kind.
+            if ($managerNotes !== null && $isSubject) {
+                throw WorkspacePolicy::fieldError(
+                    'manager_notes_restricted', 'managerNotes',
+                    'Manager-only notes cannot be edited by the supervisee.',
+                    'FORBIDDEN',
+                );
+            }
+
+            WorkspacePolicy::assertExpectedVersion((int) $row->version, $expectedVersion);
+            WorkspacePolicy::assertTransition('supervision', (string) $row->status, $nextStatus);
+
+            $actions = isset($input['actions']) ? Validate::arrayOf($input['actions'], 'actions', 50) : null;
+            if ($actions !== null) {
+                foreach ($actions as $index => $action) {
+                    $action = Validate::object($action, "actions.$index");
+                    Validate::string($action['title'] ?? null, "actions.$index.title", 2, 220);
+                }
+            }
+
+            $now = Dates::nowMillis();
+
+            DB::table('supervisionSessions')->where('id', $row->id)->update([
+                'status' => $nextStatus,
+                'sharedNotesCiphertext' => $sharedNotes === null
+                    ? $row->sharedNotesCiphertext
+                    : EncryptedFields::seal($sharedNotes),
+                'managerNotesCiphertext' => $isSubject || $managerNotes === null
+                    ? $row->managerNotesCiphertext
+                    : EncryptedFields::seal($managerNotes),
+                'actions' => $actions === null
+                    ? $row->actions
+                    : json_encode($actions, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'acknowledgedBy' => $nextStatus === 'acknowledged' ? $ctx->userId() : $row->acknowledgedBy,
+                'acknowledgedAt' => $nextStatus === 'acknowledged' ? $now : $row->acknowledgedAt,
+                'completedAt' => $nextStatus === 'completed' ? $now : $row->completedAt,
+                'version' => (int) $row->version + 1,
+            ]);
+
+            return ['success' => true];
+        });
+
+        $registry->query('staffWorkspace.medicationWorkspace', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $propertyId = Validate::id($input['propertyId'] ?? null, 'propertyId');
+            $placementId = Validate::id($input['placementId'] ?? null, 'placementId');
+
+            WorkspaceGuards::assertPlacementScope($ctx->userId(), $entityId, $propertyId, $placementId, 'young_person.read');
+            WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, 'medication', 'read', $placementId);
+
+            $byPlacement = static fn (string $table) => DB::table($table)->where('placementId', $placementId);
+
+            return [
+                'stock' => $byPlacement('medicationStockTransactions')->orderByDesc('occurredAt')->get()
+                    ->map(static fn ($r) => (array) $r)->all(),
+                'selfAdministration' => $byPlacement('medicationSelfAdministrationEvents')->orderByDesc('occurredAt')->get()
+                    ->map(static fn ($r) => (array) $r)->all(),
+                'discrepancies' => $byPlacement('medicationDiscrepancies')->orderByDesc('createdAt')->get()
+                    ->map(static fn ($r) => (array) $r)->all(),
+            ];
+        });
+    }
+
+    /**
+     * The alert the person who raised a staff request receives when it is
+     * answered, mirroring server/services/staffRequestNotifications.ts.
+     *
+     * The dedupe key carries the record version, so a later decision produces a
+     * new alert rather than silently overwriting the previous one.
+     *
+     * @return array<string, mixed>
+     */
+    private static function staffRequestOutcomeNotification(int $userId, int $requestId, string $outcome, int $version): array
+    {
+        $returned = $outcome === 'returned';
+
+        return [
+            'userId' => $userId,
+            'type' => 'staff_request_outcome',
+            'title' => $outcome === 'approved' ? 'Staff request approved' : 'Staff request updated',
+            'message' => $returned
+                ? 'A manager has returned your staff request for review. Open your Staff workspace to see the outcome.'
+                : 'A manager has updated your staff request. Open your Staff workspace to see the outcome.',
+            'severity' => $returned ? 'warning' : 'info',
+            'resourceType' => 'staff_request',
+            'resourceId' => $requestId,
+            'deepLink' => '/staff',
+            'acknowledgementRequired' => 0,
+            'dedupeKey' => "staff-request-outcome:$requestId:v$version",
+        ];
     }
 
     /**
