@@ -18,6 +18,7 @@ final class RouterRegistrar
         Routers\AuthRouter::class,
         Routers\EntitiesRouter::class,
         Routers\StaffWorkspaceRouter::class,
+        Routers\WorkspaceRouter::class,
     ];
 
     public static function build(): Registry
