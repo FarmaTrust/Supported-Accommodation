@@ -80,7 +80,7 @@ final class Audit
             $previousHash = $latest->eventHash ?? null;
             $envelope = self::buildEnvelope($input, $previousHash, Dates::nowMillis());
 
-            DB::table('auditLogs')->insert([
+            $eventId = (int) DB::table('auditLogs')->insertGetId([
                 'occurredAt' => $envelope['occurredAt'],
                 'actorUserId' => $envelope['actorUserId'],
                 'actorType' => $envelope['actorType'],
@@ -99,6 +99,8 @@ final class Audit
                 'previousHash' => $envelope['previousHash'],
                 'eventHash' => $envelope['eventHash'],
             ]);
+
+            self::mirrorReceipt($eventId, $input['entityId'] ?? null, $envelope);
         };
 
         if (DB::transactionLevel() > 0) {
@@ -108,6 +110,52 @@ final class Audit
         }
 
         DB::transaction($run);
+    }
+
+    /**
+     * Writes the event out as its own JSON object beside the row.
+     *
+     * The chain proves a row has not been edited in place, but not that a row
+     * was never removed wholesale along with every hash after it. The receipt is
+     * the second copy that makes that visible: assurance.verifyAuditChain reads
+     * these back and reports any that are missing or no longer match.
+     *
+     * A storage failure is logged and swallowed, exactly as on the Node side. An
+     * audit row that exists without its receipt is reported as a warning later;
+     * an action refused because object storage was full would be worse.
+     *
+     * @param array<string, mixed> $envelope
+     */
+    private static function mirrorReceipt(int $eventId, ?int $entityId, array $envelope): void
+    {
+        try {
+            $receipt = ['schemaVersion' => 1, 'auditEventId' => $eventId] + $envelope;
+
+            $stored = EvidenceStorage::putBytes(
+                sprintf(
+                    'audit-receipts/%s/%s',
+                    $entityId ?? 'platform',
+                    gmdate('Y-m-d', intdiv((int) $envelope['occurredAt'], 1000)),
+                ),
+                $eventId . '-' . $envelope['eventHash'] . '.json',
+                'application/json',
+                (string) json_encode($receipt, self::JSON_FLAGS),
+            );
+
+            DB::table('auditReceiptMirrors')->upsert(
+                [[
+                    'auditEventId' => $eventId,
+                    'entityId' => $entityId,
+                    'storageKey' => $stored['key'],
+                    'eventHash' => $envelope['eventHash'],
+                    'status' => 'stored',
+                ]],
+                ['auditEventId'],
+                ['storageKey', 'eventHash', 'status'],
+            );
+        } catch (Throwable $error) {
+            error_log('[audit] object receipt mirror failed for event ' . $eventId . ': ' . $error->getMessage());
+        }
     }
 
     /**
