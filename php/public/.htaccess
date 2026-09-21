@@ -1,0 +1,45 @@
+# Apache/LiteSpeed configuration for the Hostinger document root.
+#
+# Two jobs: send every /api/trpc/ call to the PHP front controller, and let the
+# React router own every other path by falling back to index.html.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # The API. index.php reads the path from REQUEST_URI, so the original URL is
+    # preserved rather than rewritten into a query parameter.
+    RewriteRule ^api/trpc/ api/index.php [L,QSA]
+
+    # Anything that exists on disk (assets, images, the service worker) is served
+    # as-is.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Everything else is a client-side route.
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+# The API sets its own cache headers; hashed build assets are safe to cache hard,
+# and index.html must never be cached or a deploy leaves stale JS behind.
+<IfModule mod_headers.c>
+    <FilesMatch "\.(js|css|woff2|png|jpg|svg|webp)$">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </FilesMatch>
+    <FilesMatch "^index\.html$">
+        Header set Cache-Control "no-cache, must-revalidate"
+    </FilesMatch>
+
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# The .env file sits outside the document root, but deny it here too in case a
+# deploy ever copies it in by mistake.
+<FilesMatch "^\.env">
+    Require all denied
+</FilesMatch>
+
+Options -Indexes

@@ -1,141 +1,150 @@
-# Deploying to a Hostinger VPS
+# Deploying to Hostinger Cloud Startup
 
-This app is a long-running Node 22 process (Express + tRPC serving a built Vite SPA)
-backed by MySQL. Hostinger's shared/Premium/Business plans only run PHP, so this needs
-a **VPS (KVM) plan**. KVM 2 or larger is recommended — `vite build` is the memory-hungry
-step and can get OOM-killed on a 1 GB box.
+The account has a Cloud Startup shared plan and no VPS, and a VPS cannot be
+bought from a collaborator login. Shared hosting runs PHP and MySQL but cannot
+keep a Node process alive, so the Express/tRPC server in `server/` has no home
+there. The backend is therefore being reimplemented in PHP under `php/`, and the
+React client is deployed unchanged.
 
-Everything below is a one-time setup. After it, every push to `main` deploys via
-`.github/workflows/deploy.yml`.
+## What the client never notices
 
-## 1. Server packages
+The SPA talks to the server through tRPC's `httpBatchLink` with the superjson
+transformer (`client/src/main.tsx`). The PHP API implements that wire protocol
+rather than a REST shape of its own, so none of the 295 `useQuery`/`useMutation`
+call sites change:
+
+```
+query     GET  /api/trpc/a.b,c.d?batch=1&input={"0":{...},"1":{...}}
+mutation  POST /api/trpc/a.b            body {"json": ...}
+response  [{"result":{"data":{json,meta}}}, {"error":{...}}]
+```
+
+Session cookies are interchangeable too. `php/api/src/Jwt.php` produces and
+accepts the same HS256 tokens `jose` does in `server/_core/sdk.ts`, signed with
+`JWT_SECRET`, so a cookie issued by either runtime is honoured by the other.
+
+## Layout on the server
+
+```
+~/domains/micare.online/
+├── .env                 secrets, outside the document root
+└── public_html/         document root
+    ├── index.html       Vite build output
+    ├── assets/
+    ├── .htaccess        from php/public/.htaccess
+    └── api/
+        ├── index.php    front controller
+        └── src/         classes, denied by their own .htaccess
+```
+
+`php/api/index.php` finds the environment file two levels up, which resolves to
+`~/domains/micare.online/.env` on the server and to the repository root during
+local development. The same file therefore configures the Node server and the
+PHP API without being duplicated.
+
+## One-time setup
+
+### 1. Database
+
+Already done. The database is MariaDB 11.8 on the Cloud Startup plan, with all
+144 tables applied from `drizzle/`. Migrations are **not** run on the server:
+generate and apply them from a developer machine, with the remote address
+whitelisted under hPanel → Databases → Remote MySQL.
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt update && sudo apt install -y nodejs mysql-server nginx git
-sudo npm i -g pm2
-sudo mysql_secure_installation
+set -a; . ./.env; set +a
+npx drizzle-kit migrate
 ```
 
-## 2. Database
+Remote MySQL whitelists a specific address, and consumer ISP addresses change.
+When a connection that used to work starts timing out, check the current address
+with `curl https://api.ipify.org` and update the whitelist before suspecting the
+credentials.
 
-```bash
-sudo mysql
-```
+### 2. The environment file
 
-```sql
-CREATE DATABASE hub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'hub'@'localhost' IDENTIFIED BY 'a-long-random-password';
-GRANT ALL PRIVILEGES ON hub.* TO 'hub'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-Keep MySQL bound to `127.0.0.1` (the Ubuntu default). The app talks to it over
-localhost, so the database port never needs to be open to the internet.
-
-## 3. Deploy user and checkout
-
-```bash
-sudo adduser --disabled-password deploy
-sudo mkdir -p /var/www/hub && sudo chown deploy:deploy /var/www/hub
-sudo -iu deploy
-git clone https://github.com/FarmaTrust/Supported-Accommodation.git /var/www/hub
-```
-
-For a private repo, add a read-only deploy key on the server and register its public
-half under the repo's **Settings → Deploy keys**.
-
-## 4. Environment file
-
-`/var/www/hub/.env` — never committed, `chmod 600`:
+Upload `.env` to `~/domains/micare.online/.env` — one level **above**
+`public_html`, so no URL can reach it. Set permissions to 600.
 
 ```ini
 NODE_ENV=production
-PORT=3000
-TIDB_DATABASE_URL=mysql://hub:a-long-random-password@127.0.0.1:3306/hub
+TIDB_DATABASE_URL=mysql://u519956850_admin:PASSWORD@HOST:3306/u519956850_cgt
 JWT_SECRET=<openssl rand -hex 32>
-APP_PUBLIC_URL=https://your-domain.com
-
-# Only if the matching feature is in use
-RESEND_API_KEY=
-RESET_EMAIL_FROM=
-OAUTH_SERVER_URL=
-OWNER_OPEN_ID=
-BUILT_IN_FORGE_API_URL=
-BUILT_IN_FORGE_API_KEY=
-LOCAL_AUTH_BOOTSTRAP_TOKEN=
+APP_PUBLIC_URL=https://micare.online
+VITE_APP_ID=local
 ```
 
-## 5. First build and process start
+Use a fresh `JWT_SECRET`; changing it later signs every existing session out,
+which is the intended behaviour if one is ever suspected of leaking.
 
-```bash
-cd /var/www/hub
-npm ci
-set -a; . ./.env; set +a        # drizzle.config.ts reads the URL from the shell
-npx drizzle-kit migrate
-npm run build
-pm2 start dist/index.js --name hub
-pm2 save
-pm2 startup                      # run the command it prints, as root
-```
+### 3. Domain
 
-## 6. Nginx and TLS
+Point `micare.online` at the hosting plan in hPanel. The domain currently
+resolves to Hostinger's parking IP, so nothing is lost by repointing it. Enable
+the free SSL certificate — the session cookie is issued with `SameSite=None`
+over HTTPS and will not be stored over plain HTTP.
 
-`/etc/nginx/sites-available/hub`:
+### 4. GitHub secrets
 
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    client_max_body_size 25m;
-}
-```
-
-```bash
-sudo ln -s /etc/nginx/sites-available/hub /etc/nginx/sites-enabled/hub
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t && sudo systemctl reload nginx
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d your-domain.com
-```
-
-Point the domain's A record at the VPS IP in Hostinger's DNS panel before running
-certbot, otherwise the ACME challenge fails.
-
-## 7. GitHub secrets
-
-Repo → **Settings → Secrets and variables → Actions**:
+Repo → Settings → Secrets and variables → Actions:
 
 | Secret | Value |
 | --- | --- |
-| `VPS_HOST` | VPS IP or hostname |
-| `VPS_USER` | `deploy` |
-| `VPS_SSH_KEY` | private half of an SSH key whose public half is in `/home/deploy/.ssh/authorized_keys` |
-| `VPS_PORT` | optional, only if SSH is not on 22 |
+| `FTP_SERVER` | FTP hostname from hPanel → Files → FTP Accounts |
+| `FTP_USERNAME` | FTP account username |
+| `FTP_PASSWORD` | FTP account password |
+| `FTP_REMOTE_DIR` | `/domains/micare.online/public_html/` |
 
-Generate the key pair locally with `ssh-keygen -t ed25519 -C "gh-actions-deploy"`, paste
-the private key into `VPS_SSH_KEY`, and append the public key to the deploy user's
-`authorized_keys`.
+Every push to `main` then runs `.github/workflows/deploy.yml`: it type-checks and
+runs the PHP self-check, builds the SPA, assembles `public_html` and uploads it.
 
-## Notes
+## Running the API locally
 
-- The workflow runs `git reset --hard origin/main`, so any manual edit made directly on
-  the server is discarded on the next deploy. `.env` is untracked and survives.
-- Migrations run before the build. `drizzle-kit generate` is deliberately *not* run on
-  the server — migrations are generated locally with `npm run db:push` and committed.
-- Rollback: `git checkout <sha> && npm ci && npm run build && pm2 reload hub` on the
-  server, or revert the commit on `main` and let the pipeline redeploy.
-- Logs: `pm2 logs hub`. Status: `pm2 status`.
+PHP's built-in server is enough, because `.htaccess` only matters for routing:
+
+```bash
+php -S 127.0.0.1:8099 php/api/index.php
+curl "http://127.0.0.1:8099/api/trpc/auth.me?batch=1&input=%7B%7D"
+```
+
+The self-check needs no database or server:
+
+```bash
+npx tsx php/tests/make-fixture.ts > php/tests/fixture.json
+php php/tests/run.php
+```
+
+The fixture holds real output from `jose`, `superjson` and the production
+`buildAuditEnvelope`, so the checks fail if either runtime drifts.
+
+## Passwords do not carry over
+
+The Node server stores scrypt digests with a 16-byte salt. PHP's only scrypt
+binding requires a 32-byte salt and exposes opslimit/memlimit instead of
+N/r/p, so a Node-written hash can be read but never verified in PHP.
+
+New credentials are written with `password_hash()`'s argon2id. A credential that
+still holds a `scrypt$…` digest is recognised and refused with a reset
+requirement rather than being misread as a wrong password. The production
+database created for this deployment is empty, so this only matters if user rows
+are ever imported from the old TiDB database — those users must reset their
+passwords.
+
+## What is ported so far
+
+| Area | State |
+| --- | --- |
+| superjson wire format | done, checked against Node output byte-for-byte |
+| Session tokens (HS256) | done, interchangeable with `jose` |
+| Audit hash chain | done, hashes match `server/services/audit.ts` |
+| tRPC batching, guards, error shapes | done |
+| `auth.me`, `auth.status`, `auth.logout` | done |
+| `localAuth.bootstrapStatus`, `localAuth.login` | done |
+| The other 28 routers, ~310 procedures | not started |
+| PDF generation (`pdf-lib` × 4) | not started, needs a PHP equivalent |
+| Scheduled automation (`server/scheduled.ts`) | not started, needs hPanel cron |
+| Object storage, maps, notifications | not started; these call the Manus Forge API, which has to be reachable from Hostinger or replaced |
+
+Until the remaining routers exist, the deployed site signs in and then fails on
+every other call. Deploy it to a subdomain, or keep the domain parked, until
+enough of the surface is ported to be useful.

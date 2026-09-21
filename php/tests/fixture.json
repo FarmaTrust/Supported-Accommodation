@@ -1,0 +1,70 @@
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVuSWQiOiJ1MSIsImFwcElkIjoibG9jYWwiLCJuYW1lIjoiWmVkIiwiYXV0aFR5cGUiOiJsb2NhbCIsInBhc3N3b3JkVmVyc2lvbiI6MywiZXhwIjoxNzg5OTkwMTM5fQ.fHbAOUcAwbF8Pli8DGQaOY1ht4MRInkC35nFQsYqr3g",
+  "superjson": {
+    "json": {
+      "id": 7,
+      "name": "Ali",
+      "when": "2026-02-03T04:05:06.789Z",
+      "nested": {
+        "at": "2020-01-01T00:00:00.000Z",
+        "ok": true
+      },
+      "list": [
+        1,
+        "two",
+        null
+      ]
+    },
+    "meta": {
+      "values": {
+        "when": [
+          "Date"
+        ],
+        "nested.at": [
+          "Date"
+        ]
+      }
+    }
+  },
+  "auditInput": {
+    "actorUserId": 42,
+    "action": "auth.local.login",
+    "resourceType": "session",
+    "resourceId": 42,
+    "sensitivity": "restricted",
+    "result": "success",
+    "reasonCode": "email_password_verified"
+  },
+  "auditNoMeta": {
+    "occurredAt": 1789000000000,
+    "previousHash": null,
+    "eventHash": "d5728b13a199fca734f9b8e51d00066b4fd6a4c0ee2e5347a1a632ca23fe066d",
+    "actorUserId": 42,
+    "actorType": "user",
+    "entityId": null,
+    "propertyId": null,
+    "action": "auth.local.login",
+    "resourceType": "session",
+    "resourceId": "42",
+    "sensitivity": "restricted",
+    "result": "success",
+    "reasonCode": "email_password_verified",
+    "correlationId": null
+  },
+  "auditWithMeta": {
+    "occurredAt": 1789000000001,
+    "previousHash": "d5728b13a199fca734f9b8e51d00066b4fd6a4c0ee2e5347a1a632ca23fe066d",
+    "eventHash": "76751e9034388d621a9ff108cae7e6974f91c46b1ab1d9712747d32c2afcf9e7",
+    "actorUserId": 42,
+    "actorType": "user",
+    "entityId": null,
+    "propertyId": null,
+    "action": "auth.local.login",
+    "resourceType": "session",
+    "resourceId": "42",
+    "sensitivity": "restricted",
+    "result": "success",
+    "reasonCode": "email_password_verified",
+    "correlationId": null
+  }
+}

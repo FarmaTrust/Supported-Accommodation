@@ -13,28 +13,59 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          script_stop: true
-          script: |
-            set -euo pipefail
-            cd /var/www/hub
+          node-version: 22
+          cache: npm
 
-            git fetch --prune origin main
-            git reset --hard origin/main
+      - name: Install dependencies
+        run: npm ci
 
-            npm ci
+      - name: Check the PHP API
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: pdo_mysql, mbstring, sodium
 
-            # drizzle.config.ts reads the URL from the shell, not from .env
-            set -a; . ./.env; set +a
-            npx drizzle-kit migrate
+      # The fixture is regenerated from the Node sources on every run, so a
+      # change to the session, superjson or audit-hash format fails here rather
+      # than silently forking the audit chain in production.
+      - run: npx tsx php/tests/make-fixture.ts > php/tests/fixture.json
+      - run: php -l php/api/index.php && find php/api/src -name '*.php' -exec php -l {} \;
+      - run: php php/tests/run.php
 
-            npm run build
+      - name: Build the client
+        run: npm run build
 
-            pm2 reload hub --update-env || pm2 start dist/index.js --name hub
-            pm2 save
+      # public_html gets the built SPA, the rewrite rules and the PHP API.
+      # dist/index.js is the Node server bundle and is deliberately left behind:
+      # shared hosting cannot run it.
+      - name: Assemble the upload
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          cp -r dist/public/. upload/
+          cp php/public/.htaccess upload/.htaccess
+          cp -r php/api upload/api
+          find upload -name '.DS_Store' -delete
+          echo "--- upload tree ---"
+          find upload -maxdepth 2 | sort
+
+      - name: Upload to Hostinger
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: ./upload/
+          server-dir: ${{ secrets.FTP_REMOTE_DIR }}
+          # .env lives one level above the document root and is never in the
+          # upload, so it must never be deleted from the server either.
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            .env
