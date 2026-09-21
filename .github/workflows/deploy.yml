@@ -1,0 +1,40 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /var/www/hub
+
+            git fetch --prune origin main
+            git reset --hard origin/main
+
+            npm ci
+
+            # drizzle.config.ts reads the URL from the shell, not from .env
+            set -a; . ./.env; set +a
+            npx drizzle-kit migrate
+
+            npm run build
+
+            pm2 reload hub --update-env || pm2 start dist/index.js --name hub
+            pm2 save
