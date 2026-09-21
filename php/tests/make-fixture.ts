@@ -10,8 +10,12 @@ import { SignJWT } from "jose";
 import superjson from "superjson";
 import { buildAuditEnvelope } from "../../server/services/audit";
 import { allCapabilities, roleCapabilities } from "../../server/authz";
+import { encryptSensitive } from "../../server/services/crypto";
 
-const secret = new TextEncoder().encode("test-secret-value-1234567890");
+// Never the real JWT_SECRET: this fixture is committed, so it carries a dummy
+// secret and the encryption sample is produced with the same one.
+const TEST_SECRET = "test-secret-value-1234567890";
+const secret = new TextEncoder().encode(TEST_SECRET);
 
 const claims = { openId: "u1", appId: "local", name: "Zed", authType: "local", passwordVersion: 3 };
 
@@ -66,6 +70,11 @@ console.log(
       auditWithMeta,
       // The role matrix is security-critical: the PHP copy is compared against
       // these exact sets rather than against a reading of the source.
+      // Encrypted by the Node implementation with JWT_SECRET below, so the
+      // PHP side proves it can read what Node wrote.
+      cryptoSecret: TEST_SECRET,
+      cryptoPlaintext: "12-34-56",
+      cryptoCiphertext: encryptSensitive("12-34-56"),
       allCapabilities,
       roleCapabilities: Object.fromEntries(
         Object.entries(roleCapabilities).map(([role, caps]) => [role, [...caps].sort()]),

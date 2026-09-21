@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use App\Support\Audit;
+use App\Support\Crypto;
 use App\Support\Jwt;
 use App\Support\Superjson;
 use DateTimeImmutable;
 use DateTimeInterface;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 use stdClass;
 
 /**
@@ -134,6 +136,38 @@ final class CrossRuntimeTest extends TestCase
             json_encode($fixture['superjson']),
             json_encode(Superjson::encode($decoded)),
         );
+    }
+
+    public function test_a_value_encrypted_by_node_decrypts_here(): void
+    {
+        $fixture = $this->fixture();
+
+        // Bank sort codes and account numbers already in the database were
+        // written by the Node runtime. If this fails, moving traffic across
+        // would make them unreadable.
+        putenv('JWT_SECRET=' . $fixture['cryptoSecret']);
+        $_ENV['JWT_SECRET'] = $fixture['cryptoSecret'];
+        $_SERVER['JWT_SECRET'] = $fixture['cryptoSecret'];
+
+        $this->assertSame($fixture['cryptoPlaintext'], Crypto::decrypt($fixture['cryptoCiphertext']));
+
+        // And the other direction, so a value written here stays readable.
+        $this->assertSame('98-76-54', Crypto::decrypt(Crypto::encrypt('98-76-54')));
+    }
+
+    public function test_a_tampered_ciphertext_is_refused_rather_than_altered(): void
+    {
+        $fixture = $this->fixture();
+        putenv('JWT_SECRET=' . $fixture['cryptoSecret']);
+        $_ENV['JWT_SECRET'] = $fixture['cryptoSecret'];
+        $_SERVER['JWT_SECRET'] = $fixture['cryptoSecret'];
+
+        $parts = explode('.', Crypto::encrypt('12345678'));
+        // Flip the ciphertext; GCM's tag must catch it.
+        $parts[2] = Jwt::base64UrlEncode(strrev(Jwt::base64UrlDecode($parts[2])));
+
+        $this->expectException(RuntimeException::class);
+        Crypto::decrypt(implode('.', $parts));
     }
 
     public function test_audit_hashes_match_the_node_implementation(): void

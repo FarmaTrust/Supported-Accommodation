@@ -271,6 +271,175 @@ final class Authz
     }
 
     /**
+     * The properties a support worker is working at right now.
+     *
+     * Deliberately narrower than their standing property grants: a grant lets a
+     * manager schedule the worker, it does not by itself expose live operational
+     * records outside the shift they are on.
+     *
+     * @return array<int, int>
+     */
+    public static function currentShiftPropertyIds(int $userId, int $entityId, string $capability, ?int $nowMs = null): array
+    {
+        $access = self::assertEntityCapability($userId, $entityId, $capability);
+
+        if ($access['role'] !== 'support_worker') {
+            return self::accessiblePropertyIds($userId, $entityId, $capability);
+        }
+
+        $now = $nowMs ?? Dates::nowMillis();
+
+        return DB::table('shifts')
+            ->where('entityId', $entityId)
+            ->where('assignedUserId', $userId)
+            ->where('startsAt', '<=', $now)
+            ->where('endsAt', '>', $now)
+            ->whereIn('status', ['assigned', 'confirmed', 'in_progress'])
+            ->distinct()
+            ->pluck('propertyId')
+            ->map(static fn ($id) => (int) $id)
+            ->all();
+    }
+
+    /**
+     * The live-shift boundary for frontline property records, applied on top of
+     * the ordinary property check.
+     *
+     * @return array{role: string, allProperties: bool, customRoleSlug: string|null, entityId: int}
+     */
+    public static function assertCurrentShiftPropertyCapability(int $userId, int $entityId, int $propertyId, string $capability, ?int $nowMs = null): array
+    {
+        $access = self::assertPropertyCapability($userId, $entityId, $propertyId, $capability);
+
+        if ($access['role'] !== 'support_worker') {
+            return $access;
+        }
+
+        $now = $nowMs ?? Dates::nowMillis();
+
+        $shift = DB::table('shifts')
+            ->where('entityId', $entityId)
+            ->where('propertyId', $propertyId)
+            ->where('assignedUserId', $userId)
+            ->where('startsAt', '<=', $now)
+            ->where('endsAt', '>', $now)
+            ->whereIn('status', ['assigned', 'confirmed', 'in_progress'])
+            ->first('id');
+
+        if ($shift !== null) {
+            return $access;
+        }
+
+        self::recordDecision($userId, $entityId, 'denied', "current_shift_missing:$capability", $propertyId, 'property', $propertyId);
+
+        throw TrpcException::forbidden(
+            'This record is available only while you are on an assigned shift at this property.'
+        );
+    }
+
+    /**
+     * The canonical young-person access check: a support worker reaches a
+     * placement only through a live assignment to it.
+     *
+     * @return array{placement: array<string, mixed>, access: array<string, mixed>}
+     */
+    public static function assertPlacementCapability(int $userId, int $placementId, string $capability): array
+    {
+        $placement = DB::table('placements')->where('id', $placementId)->first();
+        if ($placement === null) {
+            throw TrpcException::notFound('Placement not found');
+        }
+
+        $placement = (array) $placement;
+        $entityId = (int) $placement['entityId'];
+        $propertyId = $placement['propertyId'] === null ? null : (int) $placement['propertyId'];
+
+        $access = $propertyId !== null
+            ? self::assertPropertyCapability($userId, $entityId, $propertyId, $capability)
+            : self::assertEntityCapability($userId, $entityId, $capability);
+
+        if (!self::roleRequiresPlacementAssignment($access['role'])) {
+            self::recordPlacementAccess($userId, $entityId, $propertyId, $placementId, 'allowed', "{$access['role']}:$capability");
+
+            return ['placement' => $placement, 'access' => $access];
+        }
+
+        $now = Dates::nowMillis();
+
+        $assigned = DB::table('workerAssignments')
+            ->where('placementId', $placementId)
+            ->where('userId', $userId)
+            ->where(fn ($q) => $q->whereNull('startsAt')->orWhere('startsAt', '<=', $now))
+            ->where(fn ($q) => $q->whereNull('endsAt')->orWhere('endsAt', '>', $now))
+            ->exists();
+
+        if (!$assigned) {
+            self::recordPlacementAccess($userId, $entityId, $propertyId, $placementId, 'denied', "assignment_missing:$capability");
+            throw TrpcException::forbidden('You are not assigned to this young person');
+        }
+
+        self::recordPlacementAccess($userId, $entityId, $propertyId, $placementId, 'allowed', "active_assignment:$capability");
+
+        return ['placement' => $placement, 'access' => $access];
+    }
+
+    /**
+     * The placement check, then the live-shift property boundary on top of it.
+     *
+     * @return array{placement: array<string, mixed>, access: array<string, mixed>}
+     */
+    public static function assertCurrentShiftPlacementCapability(int $userId, int $placementId, string $capability, ?int $nowMs = null): array
+    {
+        $result = self::assertPlacementCapability($userId, $placementId, $capability);
+
+        if ($result['access']['role'] !== 'support_worker') {
+            return $result;
+        }
+
+        $propertyId = $result['placement']['propertyId'] ?? null;
+        if ($propertyId === null) {
+            throw TrpcException::forbidden('This placement is not available during your current shift.');
+        }
+
+        self::assertCurrentShiftPropertyCapability(
+            $userId,
+            (int) $result['placement']['entityId'],
+            (int) $propertyId,
+            $capability,
+            $nowMs,
+        );
+
+        return $result;
+    }
+
+    /** Only an owner or a platform administrator configures the workspace itself. */
+    public static function ensureOwner(string $role): void
+    {
+        if ($role !== 'owner' && $role !== 'platform_admin') {
+            throw TrpcException::forbidden('Owner access required');
+        }
+    }
+
+    private static function recordPlacementAccess(int $userId, int $entityId, ?int $propertyId, int $placementId, string $result, string $reasonCode): void
+    {
+        try {
+            Audit::write([
+                'actorUserId' => $userId,
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'action' => 'young_person.access',
+                'resourceType' => 'placement',
+                'resourceId' => $placementId,
+                'sensitivity' => 'safeguarding',
+                'result' => $result,
+                'reasonCode' => $reasonCode,
+            ]);
+        } catch (Throwable $error) {
+            report($error);
+        }
+    }
+
+    /**
      * Merges JSON string lists, skipping anything that is not a string so a
      * malformed column cannot grant an unnamed capability.
      *

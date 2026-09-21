@@ -16,6 +16,7 @@ final class RouterRegistrar
     /** @var array<int, class-string> */
     private const ROUTERS = [
         Routers\AuthRouter::class,
+        Routers\EntitiesRouter::class,
     ];
 
     public static function build(): Registry

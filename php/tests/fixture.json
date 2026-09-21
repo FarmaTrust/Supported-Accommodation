@@ -1,6 +1,6 @@
 {
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVuSWQiOiJ1MSIsImFwcElkIjoibG9jYWwiLCJuYW1lIjoiWmVkIiwiYXV0aFR5cGUiOiJsb2NhbCIsInBhc3N3b3JkVmVyc2lvbiI6MywiZXhwIjoyNDIxMTQ5MTc1fQ.82VSb_AGtiM2XLU9P5QIoAF3hD8gEaeRI021KrWUjh4",
-  "expiredToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVuSWQiOiJ1MSIsImFwcElkIjoibG9jYWwiLCJuYW1lIjoiWmVkIiwiYXV0aFR5cGUiOiJsb2NhbCIsInBhc3N3b3JkVmVyc2lvbiI6MywiZXhwIjoxNzg5OTk3MTE1fQ.n7MY_k3gDJeFXAUTsEVMyMJsx1N2R2U_slNb5VdqNnw",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVuSWQiOiJ1MSIsImFwcElkIjoibG9jYWwiLCJuYW1lIjoiWmVkIiwiYXV0aFR5cGUiOiJsb2NhbCIsInBhc3N3b3JkVmVyc2lvbiI6MywiZXhwIjoyNDIxMTQ5NDk1fQ.OZyWbKBILzL94-QGTyaFBEMCIi1bCiabqFDsmX2z6Co",
+  "expiredToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVuSWQiOiJ1MSIsImFwcElkIjoibG9jYWwiLCJuYW1lIjoiWmVkIiwiYXV0aFR5cGUiOiJsb2NhbCIsInBhc3N3b3JkVmVyc2lvbiI6MywiZXhwIjoxNzg5OTk3NDM1fQ.PhsK52q_rJiAUAayutXKwkgPtpzJJtOpIZaIDDHaloc",
   "superjson": {
     "json": {
       "id": 7,
@@ -68,6 +68,9 @@
     "reasonCode": "email_password_verified",
     "correlationId": null
   },
+  "cryptoSecret": "test-secret-value-1234567890",
+  "cryptoPlaintext": "12-34-56",
+  "cryptoCiphertext": "SNqXwahm4TZ5XxLA.UwlWX2vSbxUVWB80SM6EZg.Eq4dKwB6RuQ",
   "allCapabilities": [
     "entity.read",
     "entity.write",
