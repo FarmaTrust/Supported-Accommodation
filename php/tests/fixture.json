@@ -1,6 +1,6 @@
 {
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVuSWQiOiJ1MSIsImFwcElkIjoibG9jYWwiLCJuYW1lIjoiWmVkIiwiYXV0aFR5cGUiOiJsb2NhbCIsInBhc3N3b3JkVmVyc2lvbiI6MywiZXhwIjoyNDIxMTQ5NDk1fQ.OZyWbKBILzL94-QGTyaFBEMCIi1bCiabqFDsmX2z6Co",
-  "expiredToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVuSWQiOiJ1MSIsImFwcElkIjoibG9jYWwiLCJuYW1lIjoiWmVkIiwiYXV0aFR5cGUiOiJsb2NhbCIsInBhc3N3b3JkVmVyc2lvbiI6MywiZXhwIjoxNzg5OTk3NDM1fQ.PhsK52q_rJiAUAayutXKwkgPtpzJJtOpIZaIDDHaloc",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVuSWQiOiJ1MSIsImFwcElkIjoibG9jYWwiLCJuYW1lIjoiWmVkIiwiYXV0aFR5cGUiOiJsb2NhbCIsInBhc3N3b3JkVmVyc2lvbiI6MywiZXhwIjoyNDIxMTU5NjI0fQ.NS1tyfqhhnzgsLN3NUnO_I71UmjmbcZtUpETm2DA_JU",
+  "expiredToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJvcGVuSWQiOiJ1MSIsImFwcElkIjoibG9jYWwiLCJuYW1lIjoiWmVkIiwiYXV0aFR5cGUiOiJsb2NhbCIsInBhc3N3b3JkVmVyc2lvbiI6MywiZXhwIjoxNzkwMDA3NTY0fQ.nZJLENSPproHQ9zwxkMk0QWEtAq2b8sYKr1De87LmCA",
   "superjson": {
     "json": {
       "id": 7,
@@ -70,7 +70,249 @@
   },
   "cryptoSecret": "test-secret-value-1234567890",
   "cryptoPlaintext": "12-34-56",
-  "cryptoCiphertext": "SNqXwahm4TZ5XxLA.UwlWX2vSbxUVWB80SM6EZg.Eq4dKwB6RuQ",
+  "cryptoCiphertext": "7QKe0WuyuA3oeqfW.IEIoHRXwRmaWaRoxKRlKCg.EfTi-_5txKk",
+  "workspaceTransitions": {
+    "report": {
+      "draft": [
+        "submitted"
+      ],
+      "submitted": [
+        "reviewed",
+        "returned",
+        "approved"
+      ],
+      "reviewed": [
+        "returned",
+        "approved"
+      ],
+      "returned": [
+        "submitted"
+      ],
+      "approved": [
+        "locked"
+      ],
+      "locked": []
+    },
+    "incident": {
+      "pending": [
+        "in_review",
+        "returned",
+        "approved"
+      ],
+      "in_review": [
+        "returned",
+        "approved",
+        "closed"
+      ],
+      "returned": [
+        "in_review"
+      ],
+      "approved": [
+        "closed"
+      ],
+      "closed": []
+    },
+    "property_check": {
+      "draft": [
+        "submitted"
+      ],
+      "submitted": [
+        "reviewed",
+        "returned",
+        "closed"
+      ],
+      "reviewed": [
+        "returned",
+        "closed"
+      ],
+      "returned": [
+        "submitted"
+      ],
+      "closed": []
+    },
+    "maintenance": {
+      "reported": [
+        "triaged",
+        "cancelled"
+      ],
+      "triaged": [
+        "assigned",
+        "scheduled",
+        "cancelled"
+      ],
+      "assigned": [
+        "scheduled",
+        "in_progress",
+        "cancelled"
+      ],
+      "scheduled": [
+        "in_progress",
+        "cancelled"
+      ],
+      "in_progress": [
+        "completed",
+        "cancelled"
+      ],
+      "completed": [
+        "verified",
+        "reopened"
+      ],
+      "verified": [
+        "reopened"
+      ],
+      "cancelled": [
+        "reopened"
+      ],
+      "reopened": [
+        "triaged",
+        "assigned",
+        "in_progress"
+      ]
+    },
+    "staff_request": {
+      "draft": [
+        "submitted",
+        "withdrawn"
+      ],
+      "submitted": [
+        "returned",
+        "approved",
+        "declined",
+        "withdrawn"
+      ],
+      "returned": [
+        "submitted",
+        "withdrawn"
+      ],
+      "approved": [],
+      "declined": [],
+      "withdrawn": []
+    },
+    "supervision": {
+      "scheduled": [
+        "draft",
+        "cancelled"
+      ],
+      "draft": [
+        "submitted",
+        "cancelled"
+      ],
+      "submitted": [
+        "acknowledged",
+        "completed"
+      ],
+      "acknowledged": [
+        "completed"
+      ],
+      "completed": [],
+      "cancelled": []
+    },
+    "investigation": {
+      "open": [
+        "evidence_gathering",
+        "cancelled"
+      ],
+      "evidence_gathering": [
+        "awaiting_response",
+        "review",
+        "action_plan",
+        "cancelled"
+      ],
+      "awaiting_response": [
+        "evidence_gathering",
+        "review",
+        "action_plan"
+      ],
+      "review": [
+        "evidence_gathering",
+        "action_plan",
+        "closed"
+      ],
+      "action_plan": [
+        "review",
+        "closed"
+      ],
+      "closed": [],
+      "cancelled": []
+    },
+    "medication_discrepancy": {
+      "open": [
+        "under_review",
+        "action_required"
+      ],
+      "under_review": [
+        "action_required",
+        "resolved"
+      ],
+      "action_required": [
+        "under_review",
+        "resolved"
+      ],
+      "resolved": [
+        "under_review",
+        "closed"
+      ],
+      "closed": []
+    },
+    "finance_transaction": {
+      "draft": [
+        "submitted"
+      ],
+      "submitted": [
+        "approved",
+        "returned",
+        "reversed"
+      ],
+      "approved": [
+        "reversed"
+      ],
+      "returned": [
+        "submitted"
+      ],
+      "reversed": []
+    },
+    "finance_reconciliation": {
+      "draft": [
+        "submitted"
+      ],
+      "submitted": [
+        "balanced",
+        "discrepancy",
+        "returned"
+      ],
+      "balanced": [
+        "returned",
+        "approved"
+      ],
+      "discrepancy": [
+        "returned",
+        "approved"
+      ],
+      "returned": [
+        "submitted"
+      ],
+      "approved": []
+    },
+    "finance_discrepancy": {
+      "open": [
+        "under_review",
+        "action_required"
+      ],
+      "under_review": [
+        "action_required",
+        "resolved"
+      ],
+      "action_required": [
+        "under_review",
+        "resolved"
+      ],
+      "resolved": [
+        "under_review",
+        "closed"
+      ],
+      "closed": []
+    }
+  },
   "allCapabilities": [
     "entity.read",
     "entity.write",

@@ -11,6 +11,7 @@ import superjson from "superjson";
 import { buildAuditEnvelope } from "../../server/services/audit";
 import { allCapabilities, roleCapabilities } from "../../server/authz";
 import { encryptSensitive } from "../../server/services/crypto";
+import { assertWorkspaceTransition } from "../../server/services/staffWorkspacePolicy";
 
 // Never the real JWT_SECRET: this fixture is committed, so it carries a dummy
 // secret and the encryption sample is produced with the same one.
@@ -59,6 +60,32 @@ const auditWithMeta = buildAuditEnvelope(
   1789000000001,
 );
 
+const DOMAIN_STATES: Record<string, string[]> = {
+  report: ["draft", "submitted", "reviewed", "returned", "approved", "locked"],
+  incident: ["pending", "in_review", "returned", "approved", "closed"],
+  property_check: ["draft", "submitted", "reviewed", "returned", "closed"],
+  maintenance: ["reported", "triaged", "assigned", "scheduled", "in_progress", "completed", "verified", "cancelled", "reopened"],
+  staff_request: ["draft", "submitted", "returned", "approved", "declined", "withdrawn"],
+  supervision: ["scheduled", "draft", "submitted", "acknowledged", "completed", "cancelled"],
+  investigation: ["open", "evidence_gathering", "awaiting_response", "review", "action_plan", "closed", "cancelled"],
+  medication_discrepancy: ["open", "under_review", "action_required", "resolved", "closed"],
+  finance_transaction: ["draft", "submitted", "approved", "returned", "reversed"],
+  finance_reconciliation: ["draft", "submitted", "balanced", "discrepancy", "returned", "approved"],
+  finance_discrepancy: ["open", "under_review", "action_required", "resolved", "closed"],
+};
+
+// Probe every state pair through the real guard, so the fixture records what the
+// Node implementation actually permits rather than what its table appears to say.
+const workspaceTransitions: Record<string, Record<string, string[]>> = {};
+for (const [domain, states] of Object.entries(DOMAIN_STATES)) {
+  workspaceTransitions[domain] = {};
+  for (const from of states) {
+    workspaceTransitions[domain][from] = states.filter(to => {
+      try { assertWorkspaceTransition(domain as never, from, to); return true; } catch { return false; }
+    });
+  }
+}
+
 console.log(
   JSON.stringify(
     {
@@ -75,6 +102,9 @@ console.log(
       cryptoSecret: TEST_SECRET,
       cryptoPlaintext: "12-34-56",
       cryptoCiphertext: encryptSensitive("12-34-56"),
+      // The workflow state machines decide what a manager may do to a record
+      // next, so the PHP copy is compared move by move rather than by eye.
+      workspaceTransitions,
       allCapabilities,
       roleCapabilities: Object.fromEntries(
         Object.entries(roleCapabilities).map(([role, caps]) => [role, [...caps].sort()]),
