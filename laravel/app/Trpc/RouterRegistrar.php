@@ -22,6 +22,7 @@ final class RouterRegistrar
         Routers\DocumentsRouter::class,
         Routers\EntitiesRouter::class,
         Routers\FinanceRouter::class,
+        Routers\GovernanceRouter::class,
         Routers\GovernanceHubRouter::class,
         Routers\OperationsRouter::class,
         Routers\PlacementsRouter::class,

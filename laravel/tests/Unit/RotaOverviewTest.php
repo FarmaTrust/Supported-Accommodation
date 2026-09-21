@@ -19,7 +19,7 @@ final class RotaOverviewTest extends TestCase
 {
     private const HOUR = 3600000;
 
-    /** Thursday 2026-09-17 06:00 UTC, the start of an operating day. */
+    /** Sunday 2026-09-20 06:00 UTC, the start of an operating day. */
     private const DAY_START = 1789884000000;
 
     /** @return array<string, mixed> */

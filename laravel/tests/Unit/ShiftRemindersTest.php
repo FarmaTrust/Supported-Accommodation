@@ -17,7 +17,7 @@ final class ShiftRemindersTest extends TestCase
 {
     private const HOUR = 3600000;
 
-    /** Thursday 2026-09-17 14:00 UTC, four hours into an eight-hour shift. */
+    /** Sunday 2026-09-20 14:00 UTC, four hours into an eight-hour shift. */
     private const NOW = 1789912800000;
 
     /** @return array<string, mixed> */

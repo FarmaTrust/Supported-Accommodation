@@ -19,8 +19,8 @@ final class RotaRulesTest extends TestCase
 {
     private const HOUR = 3600000;
 
-    /** Thursday 2026-09-17 08:00 UTC. */
-    private const THURSDAY_0800 = 1789891200000;
+    /** Sunday 2026-09-20 08:00 UTC, the last day of a Monday-to-Sunday week. */
+    private const SUNDAY_0800 = 1789891200000;
 
     /** @return array<string, float> */
     private function policy(): array
@@ -48,14 +48,14 @@ final class RotaRulesTest extends TestCase
 
     public function test_an_ordinary_shift_raises_nothing(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 6);
+        $target = $this->shift(1, self::SUNDAY_0800, 6);
 
         $this->assertSame([], RotaRules::evaluateWorkingTime($target, [$target], [], $this->policy()));
     }
 
     public function test_a_shift_longer_than_the_policy_maximum_is_blocked(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 13);
+        $target = $this->shift(1, self::SUNDAY_0800, 13);
         $issues = RotaRules::evaluateWorkingTime($target, [$target], [], $this->policy());
 
         $this->assertContains('maximum_shift', $this->types($issues));
@@ -65,8 +65,8 @@ final class RotaRulesTest extends TestCase
 
     public function test_overlapping_shifts_for_the_same_person_are_blocked(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 6);
-        $other = $this->shift(2, self::THURSDAY_0800 + 2 * self::HOUR, 6);
+        $target = $this->shift(1, self::SUNDAY_0800, 6);
+        $other = $this->shift(2, self::SUNDAY_0800 + 2 * self::HOUR, 6);
 
         $issues = RotaRules::evaluateWorkingTime($target, [$target, $other], [], $this->policy());
 
@@ -75,8 +75,8 @@ final class RotaRulesTest extends TestCase
 
     public function test_two_people_on_the_same_hours_do_not_overlap(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 6, 1);
-        $colleague = $this->shift(2, self::THURSDAY_0800, 6, 2);
+        $target = $this->shift(1, self::SUNDAY_0800, 6, 1);
+        $colleague = $this->shift(2, self::SUNDAY_0800, 6, 2);
 
         $issues = RotaRules::evaluateWorkingTime($target, [$target, $colleague], [], $this->policy());
 
@@ -85,9 +85,9 @@ final class RotaRulesTest extends TestCase
 
     public function test_too_little_rest_since_the_last_shift_is_blocked(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 6);
+        $target = $this->shift(1, self::SUNDAY_0800, 6);
         // Ended eight hours before this one starts; the policy asks for eleven.
-        $previous = $this->shift(2, self::THURSDAY_0800 - 12 * self::HOUR, 4);
+        $previous = $this->shift(2, self::SUNDAY_0800 - 12 * self::HOUR, 4);
 
         $issues = RotaRules::evaluateWorkingTime($target, [$target, $previous], [], $this->policy());
 
@@ -96,8 +96,8 @@ final class RotaRulesTest extends TestCase
 
     public function test_enough_rest_since_the_last_shift_raises_nothing(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 6);
-        $previous = $this->shift(2, self::THURSDAY_0800 - 18 * self::HOUR, 4);
+        $target = $this->shift(1, self::SUNDAY_0800, 6);
+        $previous = $this->shift(2, self::SUNDAY_0800 - 18 * self::HOUR, 4);
 
         $issues = RotaRules::evaluateWorkingTime($target, [$target, $previous], [], $this->policy());
 
@@ -106,11 +106,11 @@ final class RotaRulesTest extends TestCase
 
     public function test_the_weekly_ceiling_counts_the_whole_week(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 10);
+        $target = $this->shift(1, self::SUNDAY_0800, 10);
         $all = [$target];
         // Four more ten-hour days in the same Monday-to-Monday week.
         for ($i = 1; $i <= 4; $i++) {
-            $all[] = $this->shift($i + 1, self::THURSDAY_0800 - $i * 24 * self::HOUR, 10);
+            $all[] = $this->shift($i + 1, self::SUNDAY_0800 - $i * 24 * self::HOUR, 10);
         }
 
         $issues = RotaRules::evaluateWorkingTime($target, $all, [], $this->policy());
@@ -120,10 +120,10 @@ final class RotaRulesTest extends TestCase
 
     public function test_booked_leave_blocks_the_shift(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 6);
+        $target = $this->shift(1, self::SUNDAY_0800, 6);
         $availability = [[
-            'userId' => 1, 'startsAt' => self::THURSDAY_0800 - self::HOUR,
-            'endsAt' => self::THURSDAY_0800 + 8 * self::HOUR,
+            'userId' => 1, 'startsAt' => self::SUNDAY_0800 - self::HOUR,
+            'endsAt' => self::SUNDAY_0800 + 8 * self::HOUR,
             'availabilityType' => 'annual_leave', 'status' => 'approved',
         ]];
 
@@ -134,10 +134,10 @@ final class RotaRulesTest extends TestCase
 
     public function test_availability_that_is_not_active_does_not_block(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 6);
+        $target = $this->shift(1, self::SUNDAY_0800, 6);
         $availability = [[
-            'userId' => 1, 'startsAt' => self::THURSDAY_0800,
-            'endsAt' => self::THURSDAY_0800 + 8 * self::HOUR,
+            'userId' => 1, 'startsAt' => self::SUNDAY_0800,
+            'endsAt' => self::SUNDAY_0800 + 8 * self::HOUR,
             'availabilityType' => 'annual_leave', 'status' => 'declined',
         ]];
 
@@ -149,7 +149,7 @@ final class RotaRulesTest extends TestCase
     public function test_a_long_night_shift_warns_rather_than_blocks(): void
     {
         // Starts at midnight UTC and runs ten hours.
-        $target = $this->shift(1, self::THURSDAY_0800 - 8 * self::HOUR, 10);
+        $target = $this->shift(1, self::SUNDAY_0800 - 8 * self::HOUR, 10);
 
         $issues = RotaRules::evaluateWorkingTime($target, [$target], [], $this->policy());
         $night = array_values(array_filter($issues, static fn ($i) => $i['exceptionType'] === 'night_work'));
@@ -160,7 +160,7 @@ final class RotaRulesTest extends TestCase
 
     public function test_a_shift_past_the_break_threshold_warns(): void
     {
-        $target = $this->shift(1, self::THURSDAY_0800, 8);
+        $target = $this->shift(1, self::SUNDAY_0800, 8);
 
         $issues = RotaRules::evaluateWorkingTime($target, [$target], [], $this->policy());
         $break = array_values(array_filter($issues, static fn ($i) => $i['exceptionType'] === 'break'));
