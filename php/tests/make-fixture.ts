@@ -12,9 +12,19 @@ import { buildAuditEnvelope } from "../../server/services/audit";
 
 const secret = new TextEncoder().encode("test-secret-value-1234567890");
 
-const token = await new SignJWT({ openId: "u1", appId: "local", name: "Zed", authType: "local", passwordVersion: 3 })
+const claims = { openId: "u1", appId: "local", name: "Zed", authType: "local", passwordVersion: 3 };
+
+// Far-future expiry on purpose. A fixture generated with a short life starts
+// failing an hour after it is written, which looks like a real regression.
+const token = await new SignJWT(claims)
   .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-  .setExpirationTime(Math.floor(Date.now() / 1000) + 3600)
+  .setExpirationTime("20y")
+  .sign(secret);
+
+// Expiry is still covered, against a token jose itself considers stale.
+const expiredToken = await new SignJWT(claims)
+  .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+  .setExpirationTime(Math.floor(Date.now() / 1000) - 60)
   .sign(secret);
 
 const sample = {
@@ -48,6 +58,7 @@ console.log(
   JSON.stringify(
     {
       token,
+      expiredToken,
       superjson: superjson.serialize(sample),
       auditInput,
       auditNoMeta,

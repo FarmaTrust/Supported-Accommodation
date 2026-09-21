@@ -90,6 +90,9 @@ if (is_file($fixturePath)) {
         && $joseClaims['authType'] === 'local'
         && $joseClaims['passwordVersion'] === 3);
 
+    check('jose-signed token that has expired is rejected',
+        Jwt::verify($fixture['expiredToken'], $secret) === null);
+
     $decoded = Superjson::decode($fixture['superjson']);
     check('node superjson decodes to php dates', $decoded['when'] instanceof DateTimeInterface
         && $decoded['when']->format('Y-m-d\TH:i:s.v\Z') === '2026-02-03T04:05:06.789Z'
