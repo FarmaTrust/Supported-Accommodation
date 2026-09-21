@@ -89,6 +89,36 @@ final class StaffWorkspaceRouter
         'contact_change', 'certificate_submission', 'sickness', 'holiday', 'availability_change',
     ];
 
+    private const STOCK_TRANSACTION_TYPES = [
+        'receipt', 'administration', 'return', 'disposal', 'correction', 'count',
+    ];
+
+    private const SELF_ADMIN_EVENTS = [
+        'assessment', 'authorised', 'supported', 'self_administered',
+        'observed', 'withheld', 'reviewed', 'revoked',
+    ];
+
+    private const SELF_ADMIN_OUTCOMES = [
+        'safe', 'support_required', 'not_safe', 'completed', 'refused', 'omitted', 'not_applicable',
+    ];
+
+    private const MEDICATION_DISCREPANCY_TYPES = [
+        'missing_stock', 'excess_stock', 'wrong_dose', 'wrong_time', 'wrong_person',
+        'recording_error', 'storage', 'expiry', 'other',
+    ];
+
+    private const RESIDENT_ACCOUNT_TYPES = [
+        'cash_allowance', 'savings', 'personal_budget', 'petty_cash', 'other',
+    ];
+
+    private const RESIDENT_TRANSACTION_TYPES = [
+        'deposit', 'withdrawal', 'purchase', 'refund', 'adjustment', 'reversal',
+    ];
+
+    private const FINANCE_DISCREPANCY_TYPES = [
+        'cash_short', 'cash_over', 'missing_receipt', 'duplicate', 'unauthorised', 'calculation', 'other',
+    ];
+
     public static function register(Registry $registry): void
     {
         $registry->query('staffWorkspace.context', Registry::USER, static function (Context $ctx, mixed $input): array {
@@ -1449,6 +1479,365 @@ final class StaffWorkspaceRouter
                     ->map(static fn ($r) => (array) $r)->all(),
             ];
         });
+
+        $registry->mutation('staffWorkspace.recordMedicationStock', Registry::USER, static function (Context $ctx, mixed $input): array {
+            [$entityId, $propertyId, $placementId] = self::medicationScope($ctx, $input, 'write');
+
+            $medicationId = Validate::id($input['medicationId'] ?? null, 'medicationId');
+
+            // The medicine has to belong to this young person. Without this a
+            // stock movement could be booked against someone else's chart.
+            $medicine = DB::table('medications')
+                ->where('id', $medicationId)->where('placementId', $placementId)->first('id');
+            if ($medicine === null) {
+                throw TrpcException::notFound('Medication not found for this placement');
+            }
+
+            $id = (int) DB::table('medicationStockTransactions')->insertGetId([
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'placementId' => $placementId,
+                'medicationId' => $medicationId,
+                'administrationId' => Validate::optionalId($input['administrationId'] ?? null, 'administrationId'),
+                'transactionType' => Validate::enum($input['transactionType'] ?? null, self::STOCK_TRANSACTION_TYPES, 'transactionType'),
+                'quantity' => (string) Validate::decimal($input['quantity'] ?? null, 'quantity', 0.000001, 100000),
+                'balanceAfter' => (string) Validate::decimal($input['balanceAfter'] ?? null, 'balanceAfter', 0, 100000),
+                'unit' => Validate::string($input['unit'] ?? null, 'unit', 1, 60),
+                'batchReference' => Validate::optionalString($input['batchReference'] ?? null, 'batchReference', 120),
+                'expiresAt' => isset($input['expiresAt']) ? Validate::int($input['expiresAt'], 'expiresAt') : null,
+                'reasonCiphertext' => EncryptedFields::seal(Validate::optionalString($input['reason'] ?? null, 'reason', 4000)),
+                // A second signature on a controlled-drug movement.
+                'witnessUserId' => Validate::optionalId($input['witnessUserId'] ?? null, 'witnessUserId'),
+                'documentId' => Validate::optionalId($input['documentId'] ?? null, 'documentId'),
+                'occurredAt' => Dates::nowMillis(),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.recordSelfAdministration', Registry::USER, static function (Context $ctx, mixed $input): array {
+            [$entityId, $propertyId, $placementId] = self::medicationScope($ctx, $input, 'write');
+
+            $eventType = Validate::enum($input['eventType'] ?? null, self::SELF_ADMIN_EVENTS, 'eventType');
+            $competency = isset($input['competencySnapshot'])
+                ? Validate::object($input['competencySnapshot'], 'competencySnapshot')
+                : null;
+
+            $id = (int) DB::table('medicationSelfAdministrationEvents')->insertGetId([
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'placementId' => $placementId,
+                'medicationId' => Validate::id($input['medicationId'] ?? null, 'medicationId'),
+                'administrationId' => Validate::optionalId($input['administrationId'] ?? null, 'administrationId'),
+                'stockTransactionId' => Validate::optionalId($input['stockTransactionId'] ?? null, 'stockTransactionId'),
+                'discrepancyId' => Validate::optionalId($input['discrepancyId'] ?? null, 'discrepancyId'),
+                'eventType' => $eventType,
+                'outcome' => Validate::enum($input['outcome'] ?? null, self::SELF_ADMIN_OUTCOMES, 'outcome'),
+                'detailsCiphertext' => EncryptedFields::seal(Validate::string($input['details'] ?? null, 'details', 5, 8000)),
+                'competencySnapshot' => $competency === null ? null : json_encode($competency, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                'nextReviewAt' => isset($input['nextReviewAt']) ? Validate::int($input['nextReviewAt'], 'nextReviewAt') : null,
+                // Authorising, reviewing or revoking self-administration is a
+                // decision, so it records who made it.
+                'reviewedBy' => in_array($eventType, ['authorised', 'reviewed', 'revoked'], true) ? $ctx->userId() : null,
+                'occurredAt' => Dates::nowMillis(),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.recordMedicationDiscrepancy', Registry::USER, static function (Context $ctx, mixed $input): array {
+            [$entityId, $propertyId, $placementId] = self::medicationScope($ctx, $input, 'write');
+
+            $discrepancyType = Validate::enum($input['discrepancyType'] ?? null, self::MEDICATION_DISCREPANCY_TYPES, 'discrepancyType');
+
+            $id = (int) DB::table('medicationDiscrepancies')->insertGetId([
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'placementId' => $placementId,
+                'medicationId' => Validate::id($input['medicationId'] ?? null, 'medicationId'),
+                'administrationId' => Validate::optionalId($input['administrationId'] ?? null, 'administrationId'),
+                'stockTransactionId' => Validate::optionalId($input['stockTransactionId'] ?? null, 'stockTransactionId'),
+                'discrepancyType' => $discrepancyType,
+                'expectedQuantity' => isset($input['expectedQuantity']) ? (string) Validate::decimal($input['expectedQuantity'], 'expectedQuantity', 0) : null,
+                'actualQuantity' => isset($input['actualQuantity']) ? (string) Validate::decimal($input['actualQuantity'], 'actualQuantity', 0) : null,
+                'detailsCiphertext' => EncryptedFields::seal(Validate::string($input['details'] ?? null, 'details', 5, 8000)),
+                // What was done about it straight away is required: a medication
+                // discrepancy with no immediate action is an incomplete record.
+                'immediateActionsCiphertext' => EncryptedFields::seal(Validate::string($input['immediateActions'] ?? null, 'immediateActions', 5, 8000)),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            StaffWorkspaceSupport::notifyManagers(
+                $entityId, $propertyId, 'medication_discrepancy', $id,
+                'Medication discrepancy',
+                // A wrong dose, the wrong person, or stock that has gone missing
+                // are the ones that cannot wait.
+                in_array($discrepancyType, ['wrong_dose', 'wrong_person', 'missing_stock'], true),
+                '/app/manager/inbox',
+            );
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.reviewMedicationDiscrepancy', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $discrepancyId = Validate::id($input['discrepancyId'] ?? null, 'discrepancyId');
+            $nextStatus = Validate::enum($input['nextStatus'] ?? null, ['under_review', 'action_required', 'resolved', 'closed'], 'nextStatus');
+            $resolution = Validate::optionalString($input['resolution'] ?? null, 'resolution', 8000);
+
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $row = DB::table('medicationDiscrepancies')->where('id', $discrepancyId)->where('entityId', $entityId)->first();
+            if ($row === null) {
+                throw TrpcException::notFound('Medication discrepancy not found');
+            }
+
+            WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, 'medication', 'write', (int) $row->placementId);
+            WorkspacePolicy::assertIndependentReviewer($row->createdBy === null ? null : (int) $row->createdBy, $ctx->userId());
+            WorkspacePolicy::assertTransition('medication_discrepancy', (string) $row->status, $nextStatus);
+
+            DB::table('medicationDiscrepancies')->where('id', $row->id)->update([
+                'status' => $nextStatus,
+                'resolutionCiphertext' => EncryptedFields::seal($resolution),
+                'reviewedBy' => $ctx->userId(),
+                'reviewedAt' => Dates::nowMillis(),
+            ]);
+
+            return ['success' => true];
+        });
+
+        $registry->query('staffWorkspace.financeWorkspace', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $propertyId = Validate::id($input['propertyId'] ?? null, 'propertyId');
+            $placementId = Validate::id($input['placementId'] ?? null, 'placementId');
+
+            WorkspaceGuards::assertPlacementScope($ctx->userId(), $entityId, $propertyId, $placementId, 'young_person.read');
+            WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, 'finance', 'read', $placementId);
+
+            $accounts = DB::table('residentFinanceAccounts')->where('placementId', $placementId)->get();
+            $accountIds = $accounts->pluck('id')->map(static fn ($id) => (int) $id)->all();
+
+            $byAccount = static fn (string $table, string $order) => $accountIds === []
+                ? []
+                : DB::table($table)->whereIn('accountId', $accountIds)->orderByDesc($order)->get()
+                    ->map(static fn ($r) => (array) $r)->all();
+
+            return [
+                'accounts' => $accounts->map(static fn ($r) => (array) $r)->all(),
+                'transactions' => $byAccount('residentFinanceTransactions', 'occurredAt'),
+                'reconciliations' => $byAccount('residentFinanceReconciliations', 'periodEnd'),
+                'discrepancies' => $byAccount('residentFinanceDiscrepancies', 'createdAt'),
+                'valuables' => DB::table('residentValuables')->where('placementId', $placementId)
+                    ->orderByDesc('receivedAt')->get()->map(static fn ($r) => (array) $r)->all(),
+            ];
+        });
+
+        $registry->mutation('staffWorkspace.createResidentAccount', Registry::USER, static function (Context $ctx, mixed $input): array {
+            [$entityId, $propertyId, $placementId] = self::financeScope($ctx, $input);
+
+            $id = (int) DB::table('residentFinanceAccounts')->insertGetId([
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'placementId' => $placementId,
+                'accountType' => Validate::enum($input['accountType'] ?? null, self::RESIDENT_ACCOUNT_TYPES, 'accountType'),
+                'name' => Validate::string($input['name'] ?? null, 'name', 2, 180),
+                'balance' => number_format(Validate::decimal($input['openingBalance'] ?? 0, 'openingBalance', 0, 1000000), 2, '.', ''),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.recordResidentTransaction', Registry::USER, static function (Context $ctx, mixed $input): array {
+            [$entityId, , $placementId] = self::financeScope($ctx, $input);
+
+            $accountId = Validate::id($input['accountId'] ?? null, 'accountId');
+            $transactionType = Validate::enum($input['transactionType'] ?? null, self::RESIDENT_TRANSACTION_TYPES, 'transactionType');
+            $amount = Validate::decimal($input['amount'] ?? null, 'amount', 0.01, 1000000);
+            $expectedAccountVersion = Validate::int($input['expectedAccountVersion'] ?? null, 'expectedAccountVersion', 1);
+
+            $account = DB::table('residentFinanceAccounts')
+                ->where('id', $accountId)->where('placementId', $placementId)->first();
+
+            if ($account === null) {
+                throw TrpcException::notFound('Resident account not found');
+            }
+
+            // The balance is read, changed and written under the version the
+            // caller saw, so two workers spending at once cannot both succeed
+            // against the same starting balance.
+            WorkspacePolicy::assertExpectedVersion((int) $account->version, $expectedAccountVersion);
+
+            $signed = WorkspacePolicy::signedAmount($transactionType, $amount);
+            $nextBalance = round((float) $account->balance + $signed, 2);
+
+            if ($nextBalance < 0) {
+                throw WorkspacePolicy::fieldError(
+                    'insufficient_balance', 'amount',
+                    'Transaction would make the resident account negative',
+                );
+            }
+
+            $transactionId = DB::transaction(static function () use ($ctx, $entityId, $account, $placementId, $accountId, $transactionType, $amount, $nextBalance, $input): int {
+                $id = (int) DB::table('residentFinanceTransactions')->insertGetId([
+                    'entityId' => $entityId,
+                    'placementId' => $placementId,
+                    'accountId' => $accountId,
+                    'transactionType' => $transactionType,
+                    'amount' => number_format($amount, 2, '.', ''),
+                    'balanceAfter' => number_format($nextBalance, 2, '.', ''),
+                    // What the money was for, and who it went to, name the young
+                    // person's private spending.
+                    'purposeCiphertext' => EncryptedFields::seal(Validate::string($input['purpose'] ?? null, 'purpose', 2, 5000)),
+                    'counterpartyCiphertext' => EncryptedFields::seal(Validate::optionalString($input['counterparty'] ?? null, 'counterparty', 2000)),
+                    'receiptDocumentId' => Validate::optionalId($input['receiptDocumentId'] ?? null, 'receiptDocumentId'),
+                    'occurredAt' => Dates::nowMillis(),
+                    'createdBy' => $ctx->userId(),
+                ]);
+
+                DB::table('residentFinanceAccounts')->where('id', $account->id)->update([
+                    'balance' => number_format($nextBalance, 2, '.', ''),
+                    'version' => (int) $account->version + 1,
+                ]);
+
+                return $id;
+            });
+
+            return ['id' => $transactionId];
+        });
+
+        $registry->mutation('staffWorkspace.reviewResidentTransaction', Registry::USER, static function (Context $ctx, mixed $input): array {
+            $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+            $transactionId = Validate::id($input['transactionId'] ?? null, 'transactionId');
+            $decision = Validate::enum($input['decision'] ?? null, ['approved', 'returned', 'reversed'], 'decision');
+            $notes = Validate::optionalString($input['notes'] ?? null, 'notes', 5000);
+
+            WorkspaceGuards::assertManager($ctx->userId(), $entityId);
+
+            $row = DB::table('residentFinanceTransactions')->where('id', $transactionId)->where('entityId', $entityId)->first();
+            if ($row === null) {
+                throw TrpcException::notFound('Transaction not found');
+            }
+
+            WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, 'finance', 'write', (int) $row->placementId);
+            // Nobody approves the spend they recorded.
+            WorkspacePolicy::assertIndependentReviewer($row->createdBy === null ? null : (int) $row->createdBy, $ctx->userId());
+            WorkspacePolicy::assertTransition('finance_transaction', (string) $row->status, $decision);
+
+            $now = Dates::nowMillis();
+
+            DB::table('residentFinanceTransactions')->where('id', $row->id)->update([
+                'status' => $decision,
+                'reviewNotesCiphertext' => EncryptedFields::seal($notes),
+                'approvedBy' => $decision === 'approved' ? $ctx->userId() : $row->approvedBy,
+                'approvedAt' => $decision === 'approved' ? $now : $row->approvedAt,
+                'reversedBy' => $decision === 'reversed' ? $ctx->userId() : $row->reversedBy,
+                'reversedAt' => $decision === 'reversed' ? $now : $row->reversedAt,
+            ]);
+
+            return ['success' => true];
+        });
+
+        $registry->mutation('staffWorkspace.reconcileResidentFinance', Registry::USER, static function (Context $ctx, mixed $input): array {
+            [$entityId, $propertyId, $placementId] = self::financeScope($ctx, $input);
+
+            $periodStart = Validate::int($input['periodStart'] ?? null, 'periodStart');
+            $periodEnd = Validate::int($input['periodEnd'] ?? null, 'periodEnd');
+
+            if ($periodEnd <= $periodStart) {
+                throw WorkspacePolicy::fieldError('period_invalid', 'periodEnd', 'Period end must be after period start');
+            }
+
+            $expected = Validate::decimal($input['expectedClosingBalance'] ?? null, 'expectedClosingBalance');
+            $actual = Validate::decimal($input['actualClosingBalance'] ?? null, 'actualClosingBalance');
+            $difference = round($actual - $expected, 2);
+
+            $id = (int) DB::table('residentFinanceReconciliations')->insertGetId([
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'placementId' => $placementId,
+                'accountId' => Validate::id($input['accountId'] ?? null, 'accountId'),
+                'workPlanActionId' => Validate::optionalId($input['workPlanActionId'] ?? null, 'workPlanActionId'),
+                'periodStart' => $periodStart,
+                'periodEnd' => $periodEnd,
+                'openingBalance' => number_format(Validate::decimal($input['openingBalance'] ?? null, 'openingBalance'), 2, '.', ''),
+                'expectedClosingBalance' => number_format($expected, 2, '.', ''),
+                'actualClosingBalance' => number_format($actual, 2, '.', ''),
+                'difference' => number_format($difference, 2, '.', ''),
+                'notesCiphertext' => EncryptedFields::seal(Validate::optionalString($input['notes'] ?? null, 'notes', 5000)),
+                // The count either matches or it does not; the status follows
+                // from the arithmetic rather than from what the caller asserts.
+                'status' => $difference === 0.0 ? 'balanced' : 'discrepancy',
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            return ['id' => $id];
+        });
+
+        $registry->mutation('staffWorkspace.recordFinanceDiscrepancy', Registry::USER, static function (Context $ctx, mixed $input): array {
+            [$entityId, $propertyId, $placementId] = self::financeScope($ctx, $input);
+
+            $discrepancyType = Validate::enum($input['discrepancyType'] ?? null, self::FINANCE_DISCREPANCY_TYPES, 'discrepancyType');
+
+            $id = (int) DB::table('residentFinanceDiscrepancies')->insertGetId([
+                'entityId' => $entityId,
+                'propertyId' => $propertyId,
+                'placementId' => $placementId,
+                'accountId' => Validate::id($input['accountId'] ?? null, 'accountId'),
+                'transactionId' => Validate::optionalId($input['transactionId'] ?? null, 'transactionId'),
+                'reconciliationId' => Validate::optionalId($input['reconciliationId'] ?? null, 'reconciliationId'),
+                'workPlanActionId' => Validate::optionalId($input['workPlanActionId'] ?? null, 'workPlanActionId'),
+                'discrepancyType' => $discrepancyType,
+                'amount' => isset($input['amount']) ? number_format(Validate::decimal($input['amount'], 'amount', 0), 2, '.', '') : null,
+                'detailsCiphertext' => EncryptedFields::seal(Validate::string($input['details'] ?? null, 'details', 5, 8000)),
+                'immediateActionsCiphertext' => EncryptedFields::seal(Validate::optionalString($input['immediateActions'] ?? null, 'immediateActions', 8000)),
+                'createdBy' => $ctx->userId(),
+            ]);
+
+            StaffWorkspaceSupport::notifyManagers(
+                $entityId, $propertyId, 'resident_finance_discrepancy', $id,
+                'Resident-finance discrepancy',
+                // Money moved without authority is the one that cannot wait.
+                $discrepancyType === 'unauthorised',
+                '/app/manager/inbox',
+            );
+
+            return ['id' => $id];
+        });
+    }
+
+    /**
+     * Medication records need the placement scope and the medication
+     * sensitivity together: the first confines a worker to the young people they
+     * are assigned to, the second to the medication capability.
+     *
+     * @return array{0: int, 1: int, 2: int}
+     */
+    private static function medicationScope(Context $ctx, mixed $input, string $mode): array
+    {
+        $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+        $propertyId = Validate::id($input['propertyId'] ?? null, 'propertyId');
+        $placementId = Validate::id($input['placementId'] ?? null, 'placementId');
+
+        WorkspaceGuards::assertPlacementScope($ctx->userId(), $entityId, $propertyId, $placementId, 'medication.write');
+        WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, 'medication', $mode, $placementId);
+
+        return [$entityId, $propertyId, $placementId];
+    }
+
+    /** The same pairing for a young person's own money. */
+    private static function financeScope(Context $ctx, mixed $input): array
+    {
+        $entityId = Validate::id($input['entityId'] ?? null, 'entityId');
+        $propertyId = Validate::id($input['propertyId'] ?? null, 'propertyId');
+        $placementId = Validate::id($input['placementId'] ?? null, 'placementId');
+
+        WorkspaceGuards::assertPlacementScope($ctx->userId(), $entityId, $propertyId, $placementId, 'resident_finance.write');
+        WorkspaceGuards::assertSensitiveAccess($ctx->userId(), $entityId, 'finance', 'write', $placementId);
+
+        return [$entityId, $propertyId, $placementId];
     }
 
     /**
