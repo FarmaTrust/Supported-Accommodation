@@ -26,6 +26,7 @@ final class RouterRegistrar
         Routers\FinanceRouter::class,
         Routers\GovernanceRouter::class,
         Routers\GovernanceHubRouter::class,
+        Routers\KeyworkRouter::class,
         Routers\OperationsRouter::class,
         Routers\PlacementsRouter::class,
         Routers\QualityRouter::class,
